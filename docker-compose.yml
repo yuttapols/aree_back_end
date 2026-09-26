@@ -1,0 +1,42 @@
+# Dev: docker compose up -d postgres แล้วรัน ./mvnw spring-boot:run
+# ทั้งระบบ: docker compose --profile app up -d --build
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: roti5dao
+      POSTGRES_USER: roti5dao
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+    ports:
+      - "127.0.0.1:5432:5432"   # bind เฉพาะ localhost
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U roti5dao"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    profiles: ["app"]
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:postgresql://postgres:5432/roti5dao
+      DB_USERNAME: roti5dao
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      ROTI_ADMIN_PHONE: ${ROTI_ADMIN_PHONE:-}
+      ROTI_ADMIN_PASSWORD: ${ROTI_ADMIN_PASSWORD:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:4200}
+      STORAGE_DIR: /data/storage
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - storage:/data/storage
+
+volumes:
+  pgdata:
+  storage:

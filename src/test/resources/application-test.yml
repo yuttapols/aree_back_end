@@ -1,0 +1,28 @@
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed
+
+app:
+  cors:
+    allowed-origins: http://localhost:4200
+  security:
+    password:
+      # ลดเวลา test — production ใช้ 12
+      bcrypt-strength: 10
+    refresh-cookie:
+      secure: false
+    rate-limit:
+      enabled: false
+  storage:
+    local-dir: target/test-storage
+  scheduling:
+    enabled: false
+  bootstrap:
+    admin-phone: "0800000001"
+    admin-password: "Admin1234"
+    admin-nickname: "Owner"
+
+logging:
+  level:
+    root: WARN
+    com.roti5dao: INFO

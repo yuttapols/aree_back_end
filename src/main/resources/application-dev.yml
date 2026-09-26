@@ -1,0 +1,13 @@
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed
+
+app:
+  security:
+    refresh-cookie:
+      # http://localhost ไม่ใช่ HTTPS — dev เท่านั้น
+      secure: ${REFRESH_COOKIE_SECURE:false}
+
+logging:
+  level:
+    com.roti5dao: DEBUG

@@ -1,0 +1,18 @@
+server:
+  # อยู่หลัง reverse proxy (nginx) — เชื่อ X-Forwarded-* เฉพาะจาก proxy ที่ตั้งค่าไว้
+  forward-headers-strategy: native
+
+springdoc:
+  api-docs:
+    enabled: ${API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${API_DOCS_ENABLED:false}
+
+app:
+  security:
+    refresh-cookie:
+      secure: true
+
+logging:
+  level:
+    root: INFO
