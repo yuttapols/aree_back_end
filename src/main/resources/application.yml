@@ -76,8 +76,17 @@ app:
       secret: ${JWT_SECRET:}
       issuer: roti5dao
       audience: roti5dao-web
-      access-token-ttl: 15m
-      refresh-token-ttl: 14d
+      # อายุ session ตาม role — idle-timeout = ไม่ได้ใช้งานนานเท่านี้ต้อง login ใหม่
+      # access-token-ttl ต้องสั้นกว่า idle-timeout (คนที่ใช้งานอยู่จะ refresh ทุกรอบที่ access token หมดอายุ)
+      customer:
+        access-token-ttl: 5m
+        idle-timeout: 15m
+      staff:
+        access-token-ttl: 15m
+        idle-timeout: 12h
+      admin:
+        access-token-ttl: 15m
+        idle-timeout: 12h
     refresh-cookie:
       name: r5d_rt
       path: /api/v1/auth

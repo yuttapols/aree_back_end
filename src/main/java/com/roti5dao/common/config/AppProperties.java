@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotNull;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.List;
+import com.roti5dao.user.entity.Role;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.util.unit.DataSize;
 import org.springframework.validation.annotation.Validated;
@@ -40,8 +41,29 @@ public record AppProperties(
             String secret,
             @NotBlank String issuer,
             @NotBlank String audience,
-            @NotNull Duration accessTokenTtl,
-            @NotNull Duration refreshTokenTtl) {
+            @Valid @NotNull Session customer,
+            @Valid @NotNull Session staff,
+            @Valid @NotNull Session admin) {
+
+        public Session forRole(Role role) {
+            return switch (role) {
+                case CUSTOMER -> customer;
+                case STAFF -> staff;
+                case ADMIN -> admin;
+            };
+        }
+    }
+
+    /**
+     * idleTimeout = ไม่ได้ใช้งานนานเท่านี้ต้อง login ใหม่ (refresh token ต่ออายุทุกครั้งที่ rotate)
+     * accessTokenTtl ต้องสั้นกว่า idleTimeout ไม่งั้นคนที่ใช้งานอยู่จะ refresh ไม่ทันแล้วหลุด
+     */
+    public record Session(@NotNull Duration accessTokenTtl, @NotNull Duration idleTimeout) {
+        public Session {
+            if (accessTokenTtl != null && idleTimeout != null && accessTokenTtl.compareTo(idleTimeout) >= 0) {
+                throw new IllegalArgumentException("access-token-ttl must be shorter than idle-timeout");
+            }
+        }
     }
 
     public record RefreshCookie(@NotBlank String name, @NotBlank String path, boolean secure, @NotBlank String sameSite) {

@@ -88,12 +88,48 @@ class AuthSecurityIT extends IntegrationTest {
     @Test
     void expiredAccessTokenReturnsTokenExpired() {
         var s = api.newCustomer();
-        clock.advance(Duration.ofMinutes(16));
+        clock.advance(Duration.ofMinutes(6));
         Res r = api.get("/api/v1/me", s.accessToken());
         assertThat(r.status()).isEqualTo(401);
         assertThat(r.errorCode()).isEqualTo("TOKEN_EXPIRED");
-        // refresh token ยังใช้ได้ (14 วัน)
+        // refresh token ยังใช้ได้ (idle ไม่เกิน 15 นาที)
         assertThat(api.refresh(s.refreshToken()).status()).isEqualTo(200);
+    }
+
+    // ------------------------------------------------------------------ session idle timeout ตาม role
+
+    @Test
+    void customerSessionEndsAfter15MinutesIdle() {
+        var s = api.newCustomer();
+        clock.advance(Duration.ofMinutes(16));
+        assertThat(api.refresh(s.refreshToken()).status()).isEqualTo(401);
+    }
+
+    @Test
+    void activeCustomerSessionSlides() {
+        var s = api.newCustomer();
+        String refresh = s.refreshToken();
+        // ใช้งานต่อเนื่อง 40 นาที (refresh ทุก 5 นาทีตามอายุ access token) → ไม่หลุด
+        for (int i = 0; i < 8; i++) {
+            clock.advance(Duration.ofMinutes(5));
+            Res r = api.refresh(refresh);
+            assertThat(r.status()).isEqualTo(200);
+            refresh = r.cookie("r5d_rt");
+        }
+    }
+
+    @Test
+    void staffAndAdminSessionLast12HoursIdle() {
+        var staff = api.newStaff("STAFF");
+        var admin = api.newStaff("ADMIN");
+        clock.advance(Duration.ofHours(11));
+        Res staffRefreshed = api.refresh(staff.refreshToken());
+        assertThat(staffRefreshed.status()).isEqualTo(200);
+        clock.advance(Duration.ofSeconds(1));
+        assertThat(api.refresh(admin.refreshToken()).status()).isEqualTo(200);
+
+        clock.advance(Duration.ofHours(12).plusMinutes(1));
+        assertThat(api.refresh(staffRefreshed.cookie("r5d_rt")).status()).isEqualTo(401);
     }
 
     @Test

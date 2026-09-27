@@ -4,6 +4,7 @@ import com.roti5dao.auth.entity.RefreshToken;
 import com.roti5dao.auth.repository.RefreshTokenRepository;
 import com.roti5dao.common.config.AppProperties;
 import com.roti5dao.common.security.TokenHashing;
+import com.roti5dao.user.entity.Role;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -18,21 +19,24 @@ import org.springframework.transaction.annotation.Transactional;
 public class RefreshTokenService {
 
     private final RefreshTokenRepository repository;
-    private final Duration ttl;
+    private final AppProperties.Jwt jwt;
     private final Clock clock;
 
     public RefreshTokenService(RefreshTokenRepository repository, AppProperties props, Clock clock) {
         this.repository = repository;
-        this.ttl = props.security().jwt().refreshTokenTtl();
+        this.jwt = props.security().jwt();
         this.clock = clock;
     }
 
     public record Issued(String rawToken, Instant expiresAt) {
     }
 
-    /** ออก refresh token ใหม่ — familyId = null คือเริ่ม session ใหม่ (login/register) */
+    /**
+     * ออก refresh token ใหม่ — familyId = null คือเริ่ม session ใหม่ (login/register)
+     * อายุ = idle-timeout ของ role นับจากตอนนี้ จึงต่ออายุไปเรื่อยๆ ทุกครั้งที่ refresh
+     */
     @Transactional
-    public Issued issue(Long userId, UUID familyId, String userAgent) {
+    public Issued issue(Long userId, Role role, UUID familyId, String userAgent) {
         String raw = TokenHashing.randomToken();
         Instant now = Instant.now(clock);
         RefreshToken t = new RefreshToken();
@@ -40,7 +44,7 @@ public class RefreshTokenService {
         t.setTokenHash(TokenHashing.sha256Hex(raw));
         t.setFamilyId(familyId != null ? familyId : UUID.randomUUID());
         t.setCreatedAt(now);
-        t.setExpiresAt(now.plus(ttl));
+        t.setExpiresAt(now.plus(jwt.forRole(role).idleTimeout()));
         t.setUserAgent(userAgent == null ? null : userAgent.substring(0, Math.min(300, userAgent.length())));
         repository.save(t);
         return new Issued(raw, t.getExpiresAt());

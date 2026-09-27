@@ -33,7 +33,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * ออก/ตรวจ access token (JWT HS256)
- * claims: sub=userId, role, iss, aud, iat, exp, jti — อายุสั้น (ค่าเริ่มต้น 15 นาที)
+ * claims: sub=userId, role, iss, aud, iat, exp, jti — อายุสั้น ตาม role (app.security.jwt.<role>.access-token-ttl)
  */
 @Component
 public class JwtService {
@@ -68,7 +68,7 @@ public class JwtService {
 
     public IssuedToken issueAccessToken(Long userId, Role role) {
         Instant now = Instant.now(clock);
-        Instant exp = now.plus(props.accessTokenTtl());
+        Instant exp = now.plus(props.forRole(role).accessTokenTtl());
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(props.issuer())
                 .audience(List.of(props.audience()))

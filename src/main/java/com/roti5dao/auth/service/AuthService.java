@@ -147,7 +147,7 @@ public class AuthService {
 
     private AuthResult issueTokens(AppUser user, UUID familyId, String userAgent) {
         JwtService.IssuedToken access = jwtService.issueAccessToken(user.getId(), user.getRole());
-        RefreshTokenService.Issued refresh = refreshTokenService.issue(user.getId(), familyId, userAgent);
+        RefreshTokenService.Issued refresh = refreshTokenService.issue(user.getId(), user.getRole(), familyId, userAgent);
         long expiresIn = Math.max(0, Duration.between(Instant.now(clock), access.expiresAt()).toSeconds());
         TokenResponse body = new TokenResponse(access.token(), "Bearer", expiresIn, access.expiresAt(),
                 userAccountService.getMe(user.getId()));

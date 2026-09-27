@@ -50,8 +50,8 @@ Module คุยกันผ่าน service เท่านั้น · Phase 
 | เรื่อง | การทำงาน |
 |---|---|
 | รหัสผ่าน | BCrypt (12), ≥ 8 ตัว มีตัวอักษร+ตัวเลข, ≤ 72 byte |
-| Access token | JWT HS256 อายุ 15 นาที ตรวจ iss/aud/exp; ทุก request เช็กสถานะบัญชี/role ปัจจุบันจาก DB (cache 30 วิ) |
-| Refresh token | สุ่ม 256-bit เก็บเฉพาะ SHA-256, cookie `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`, rotate ทุกครั้ง, ใช้ซ้ำ = revoke ทุก session |
+| Access token | JWT HS256 อายุสั้นตาม role (ลูกค้า 5 นาที, พนักงาน/เจ้าของ 15 นาที) ตรวจ iss/aud/exp; ทุก request เช็กสถานะบัญชี/role ปัจจุบันจาก DB (cache 30 วิ) |
+| Refresh token | สุ่ม 256-bit เก็บเฉพาะ SHA-256, cookie `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`, rotate ทุกครั้ง, ใช้ซ้ำ = revoke ทุก session; ไม่ได้ใช้งานเกิน 15 นาที (ลูกค้า) / 12 ชม. (พนักงาน/เจ้าของ) ต้อง login ใหม่ |
 | Revocation | เปลี่ยนรหัส / ระงับบัญชี / เปลี่ยน role → access token เดิมใช้ไม่ได้ทันที (`tokens_valid_after`) |
 | Brute force | ล็อกบัญชี 15 นาทีเมื่อผิด 5 ครั้ง, rate limit ต่อ IP ที่ login/register/refresh/สั่งออนไลน์/แนบสลิป, เวลาตอบสนองเท่ากันแม้ไม่มีบัญชี |
 | สิทธิ์ | ADMIN-only ตรวจที่ URL (ก่อนอ่าน body) + `@PreAuthorize`; ข้อมูลของตัวเอง userId มาจาก token เท่านั้น; ออเดอร์คนอื่นตอบ 404 |
