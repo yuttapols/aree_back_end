@@ -76,7 +76,7 @@ public class SecurityConfig {
                                 "/api/v1/admin/promotions/**", "/api/v1/admin/dashboard/**",
                                 "/api/v1/admin/customers/*/points/adjust").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/admin/products", "/api/v1/admin/products/*/images",
-                                "/api/v1/admin/payment-methods").hasRole("ADMIN")
+                                "/api/v1/admin/payment-methods", "/api/v1/files").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/v1/admin/products/**", "/api/v1/admin/payment-methods/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/admin/products/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasAnyRole("STAFF", "ADMIN")

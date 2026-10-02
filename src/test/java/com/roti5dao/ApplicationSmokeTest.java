@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.roti5dao.support.IntegrationTest;
 import org.junit.jupiter.api.Test;
 
-/** context ขึ้นได้ = Flyway V1–V9 + seed รันผ่าน และ Entity ตรงกับ schema (ddl-auto=validate) */
+/** context ขึ้นได้ = Flyway V1–V10 + seed รันผ่าน และ Entity ตรงกับ schema (ddl-auto=validate) */
 class ApplicationSmokeTest extends IntegrationTest {
 
     @Test
@@ -13,7 +13,8 @@ class ApplicationSmokeTest extends IntegrationTest {
         var r = api.get("/api/v1/public/menu", null);
         assertThat(r.status()).isEqualTo(200);
         assertThat(r.body().get("success").asBoolean()).isTrue();
-        assertThat(r.data().size()).isEqualTo(4);
+        // V10 (หมวด "โรตี" default) + dev seed 4 หมวด
+        assertThat(r.data().size()).isEqualTo(5);
         assertThat(r.data().get(0).get("products").size()).isGreaterThan(0);
     }
 

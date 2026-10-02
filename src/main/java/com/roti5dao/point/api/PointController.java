@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "6. Points", description = "แต้มสะสม")
 public class PointController {
 
-    private static final Sort NEWEST = Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "id"));
+    private static final Sort NEWEST = PageQuery.NEWEST_FIRST.and(PageQuery.ID_DESC);
 
     private final PointService pointService;
 

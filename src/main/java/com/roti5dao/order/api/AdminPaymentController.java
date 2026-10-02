@@ -3,6 +3,7 @@ package com.roti5dao.order.api;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import com.roti5dao.common.security.CurrentUser;
+import com.roti5dao.common.storage.FileResponses;
 import com.roti5dao.common.web.ApiResponse;
 import com.roti5dao.common.web.PageQuery;
 import com.roti5dao.common.web.PageResponse;
@@ -14,10 +15,7 @@ import com.roti5dao.payment.dto.PaymentDtos.PaymentResponse;
 import com.roti5dao.payment.entity.PaymentStatus;
 import jakarta.validation.Valid;
 import org.springframework.core.io.Resource;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.CacheControl;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -45,7 +43,7 @@ public class AdminPaymentController {
     public ApiResponse<PageResponse<PendingPaymentItem>> list(@RequestParam(required = false) PaymentStatus status,
                                                               @RequestParam(required = false) Integer page,
                                                               @RequestParam(required = false) Integer size) {
-        return ApiResponse.ok(queryService.payments(status, PageQuery.of(page, size, Sort.by(Sort.Direction.ASC, "createdAt"))));
+        return ApiResponse.ok(queryService.payments(status, PageQuery.of(page, size, PageQuery.OLDEST_FIRST)));
     }
 
     @PatchMapping("/{id}/verify")
@@ -58,11 +56,6 @@ public class AdminPaymentController {
     @GetMapping("/{id}/slip")
     @Operation(summary = "🧑‍🍳 ดูรูปสลิป (private, no-store)")
     public ResponseEntity<Resource> slip(@PathVariable Long id) {
-        var file = queryService.slip(id);
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(file.type().contentType()))
-                .cacheControl(CacheControl.noStore())
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
-                .body(file.resource());
+        return FileResponses.inline(queryService.slip(id), CacheControl.noStore());
     }
 }

@@ -1,8 +1,8 @@
 package com.roti5dao.dashboard.service;
 
-import com.roti5dao.common.config.AppProperties;
 import com.roti5dao.common.exception.BusinessException;
 import com.roti5dao.common.exception.ErrorCode;
+import com.roti5dao.common.time.BusinessTime;
 import com.roti5dao.common.util.MoneyUtils;
 import com.roti5dao.dashboard.dto.DashboardDtos.GroupBy;
 import com.roti5dao.dashboard.dto.DashboardDtos.HourlyPoint;
@@ -14,9 +14,7 @@ import com.roti5dao.dashboard.dto.DashboardDtos.TrendPoint;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.sql.Timestamp;
-import java.time.Clock;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,13 +32,11 @@ public class DashboardService {
     private static final long MAX_RANGE_DAYS = 366;
 
     private final JdbcClient jdbc;
-    private final Clock clock;
-    private final ZoneId zone;
+    private final BusinessTime time;
 
-    public DashboardService(JdbcClient jdbc, Clock clock, AppProperties props) {
+    public DashboardService(JdbcClient jdbc, BusinessTime time) {
         this.jdbc = jdbc;
-        this.clock = clock;
-        this.zone = props.timezone();
+        this.time = time;
     }
 
     public Summary summary(LocalDate from, LocalDate to) {
@@ -60,7 +56,7 @@ public class DashboardService {
                         rs.getLong(5), rs.getLong(6), rs.getLong(7)})
                 .single();
         Timestamp start = startOf(from);
-        Timestamp end = startOf(to.plusDays(1));
+        Timestamp end = endOf(to);
         long cancelled = jdbc.sql("SELECT count(*) FROM orders WHERE status = 'CANCELLED' AND cancelled_at >= :s AND cancelled_at < :e")
                 .param("s", start).param("e", end).query(Long.class).single();
         long newMembers = jdbc.sql("SELECT count(*) FROM app_user WHERE role = 'CUSTOMER' AND created_at >= :s AND created_at < :e")
@@ -128,16 +124,16 @@ public class DashboardService {
                         WHERE status = 'COMPLETED' AND completed_at >= :s AND completed_at < :e
                         GROUP BY 1 ORDER BY 1
                         """)
-                .param("tz", zone.getId())
-                .param("s", startOf(date)).param("e", startOf(date.plusDays(1)))
+                .param("tz", time.zone().getId())
+                .param("s", startOf(date)).param("e", endOf(date))
                 .query((rs, n) -> new HourlyPoint(rs.getInt(1), rs.getLong(2), MoneyUtils.scale(rs.getBigDecimal(3))))
                 .list();
     }
 
     public Today today() {
-        LocalDate date = LocalDate.now(clock.withZone(zone));
+        LocalDate date = time.today();
         Timestamp s = startOf(date);
-        Timestamp e = startOf(date.plusDays(1));
+        Timestamp e = endOf(date);
         Map<String, Long> byStatus = new LinkedHashMap<>();
         jdbc.sql("SELECT status, count(*) FROM orders WHERE created_at >= :s AND created_at < :e GROUP BY status ORDER BY status")
                 .param("s", s).param("e", e)
@@ -157,7 +153,11 @@ public class DashboardService {
     }
 
     private Timestamp startOf(LocalDate date) {
-        return Timestamp.from(date.atStartOfDay(zone).toInstant());
+        return Timestamp.from(time.startOfDay(date));
+    }
+
+    private Timestamp endOf(LocalDate date) {
+        return Timestamp.from(time.endOfDay(date));
     }
 
     private static void checkRange(LocalDate from, LocalDate to) {

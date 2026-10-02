@@ -1,4 +1,7 @@
 spring:
+  config:
+    # ค่าเฉพาะเครื่อง (DB, admin bootstrap ฯลฯ) อยู่ใน .env ที่ root — gitignored, ดูตัวอย่างที่ .env.example
+    import: optional:file:.env[.properties]
   flyway:
     locations: classpath:db/migration,classpath:db/seed
 

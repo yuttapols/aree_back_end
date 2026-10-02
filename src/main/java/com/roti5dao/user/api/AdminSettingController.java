@@ -52,7 +52,7 @@ public class AdminSettingController {
     @Operation(summary = "👑 แก้การตั้งค่า {values: {key: value}}")
     public ApiResponse<List<SettingResponse>> update(@jakarta.validation.Valid @RequestBody SettingUpdateRequest req) {
         Long actor = CurrentUser.requireId();
-        var result = service.update(req.values(), "user:" + actor).stream().map(SettingResponse::of).toList();
+        var result = service.update(req.values(), CurrentUser.actorOf(actor)).stream().map(SettingResponse::of).toList();
         audit.record(Event.SETTINGS_UPDATED, actor, "keys=" + String.join(",", req.values().keySet()));
         return ApiResponse.ok(result);
     }

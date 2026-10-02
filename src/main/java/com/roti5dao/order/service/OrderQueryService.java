@@ -1,10 +1,10 @@
 package com.roti5dao.order.service;
 
-import com.roti5dao.common.config.AppProperties;
 import com.roti5dao.common.exception.NotFoundException;
 import com.roti5dao.common.setting.SettingKey;
 import com.roti5dao.common.setting.SystemSettingService;
 import com.roti5dao.common.storage.FileStorageService.LoadedFile;
+import com.roti5dao.common.time.BusinessTime;
 import com.roti5dao.common.web.PageResponse;
 import com.roti5dao.order.dto.OrderDtos.BoardItem;
 import com.roti5dao.order.dto.OrderDtos.OrderListItem;
@@ -21,14 +21,15 @@ import com.roti5dao.payment.entity.Payment;
 import com.roti5dao.payment.entity.PaymentStatus;
 import com.roti5dao.payment.service.PaymentService;
 import com.roti5dao.user.service.UserAccountService;
-import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -43,23 +44,23 @@ public class OrderQueryService {
 
     private static final Instant MIN = Instant.parse("2000-01-01T00:00:00Z");
     private static final Instant MAX = Instant.parse("2999-01-01T00:00:00Z");
+    /** สถานะที่แสดงบนคิวครัว: ยืนยันแล้วแต่ยังไม่เสร็จ */
+    private static final Set<OrderStatus> BOARD_STATUSES =
+            Collections.unmodifiableSet(EnumSet.of(OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY));
 
     private final OrderRepository orderRepository;
     private final PaymentService paymentService;
     private final UserAccountService userAccountService;
     private final SystemSettingService settings;
-    private final Clock clock;
-    private final ZoneId zone;
+    private final BusinessTime time;
 
     public OrderQueryService(OrderRepository orderRepository, PaymentService paymentService,
-                             UserAccountService userAccountService, SystemSettingService settings, Clock clock,
-                             AppProperties props) {
+                             UserAccountService userAccountService, SystemSettingService settings, BusinessTime time) {
         this.orderRepository = orderRepository;
         this.paymentService = paymentService;
         this.userAccountService = userAccountService;
         this.settings = settings;
-        this.clock = clock;
-        this.zone = props.timezone();
+        this.time = time;
     }
 
     /** ติดตามด้วย tracking token (UUID) — ไม่ต้อง login */
@@ -82,8 +83,8 @@ public class OrderQueryService {
     }
 
     public PageResponse<OrderListItem> search(OrderStatus status, OrderChannel channel, LocalDate date, Pageable pageable) {
-        Instant from = date == null ? MIN : date.atStartOfDay(zone).toInstant();
-        Instant to = date == null ? MAX : date.plusDays(1).atStartOfDay(zone).toInstant();
+        Instant from = date == null ? MIN : time.startOfDay(date);
+        Instant to = date == null ? MAX : time.endOfDay(date);
         Page<Order> page = orderRepository.search(status, channel, from, to, pageable);
         Map<Long, String> names = nicknames(page.getContent());
         return PageResponse.of(page, o -> OrderMapper.listItem(o, names.get(o.getCustomerId())));
@@ -95,10 +96,8 @@ public class OrderQueryService {
 
     /** คิวครัว: ออเดอร์วันนี้ที่ยืนยันแล้วแต่ยังไม่เสร็จ */
     public List<BoardItem> board() {
-        LocalDate today = LocalDate.now(clock.withZone(zone));
-        List<Order> orders = orderRepository.findBoard(
-                EnumSet.of(OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY),
-                today.atStartOfDay(zone).toInstant(), today.plusDays(1).atStartOfDay(zone).toInstant());
+        LocalDate today = time.today();
+        List<Order> orders = orderRepository.findBoard(BOARD_STATUSES, time.startOfDay(today), time.endOfDay(today));
         Map<Long, String> names = nicknames(orders);
         return orders.stream().map(o -> OrderMapper.boardItem(o, names.get(o.getCustomerId()))).toList();
     }
@@ -107,7 +106,7 @@ public class OrderQueryService {
         OrderResponse order = get(id);
         String cashier = order.cashierId() == null ? null : userAccountService.findNickname(order.cashierId()).orElse(null);
         return new ReceiptResponse(settings.getString(SettingKey.SHOP_NAME), settings.getString(SettingKey.SHOP_PHONE),
-                order, cashier, Instant.now(clock));
+                order, cashier, time.now());
     }
 
     public PageResponse<PendingPaymentItem> payments(PaymentStatus status, Pageable pageable) {
@@ -132,7 +131,7 @@ public class OrderQueryService {
         return OrderMapper.full(o, paymentService.forOrder(o.getId()), nickname);
     }
 
-    private Map<Long, String> nicknames(java.util.Collection<Order> orders) {
+    private Map<Long, String> nicknames(Collection<Order> orders) {
         return userAccountService.findNicknames(orders.stream().map(Order::getCustomerId).filter(Objects::nonNull)
                 .collect(Collectors.toSet()));
     }

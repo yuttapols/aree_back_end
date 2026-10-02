@@ -2,7 +2,6 @@ package com.roti5dao.promotion.api;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import com.roti5dao.common.security.AuthUser;
 import com.roti5dao.common.security.CurrentUser;
 import com.roti5dao.common.web.ApiResponse;
 import com.roti5dao.common.web.PageQuery;
@@ -18,7 +17,6 @@ import com.roti5dao.promotion.dto.PromotionDtos.UsageResponse;
 import com.roti5dao.promotion.service.PromotionAdminService;
 import jakarta.validation.Valid;
 import java.util.List;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -61,7 +59,7 @@ public class PromotionController {
     @PostMapping("/public/promotions/validate")
     @Operation(summary = "🌐 ตรวจโค้ดโปรกับตะกร้า (ผลเหมือน quote)")
     public ApiResponse<QuoteResponse> validate(@Valid @RequestBody QuoteRequest req) {
-        Long customerId = CurrentUser.get().map(AuthUser::id).orElse(null);
+        Long customerId = CurrentUser.idOrNull();
         return ApiResponse.ok(orderService.quote(req.items(), req.promoCode(), 0, customerId, OrderChannel.ONLINE));
     }
 
@@ -73,7 +71,7 @@ public class PromotionController {
     public ApiResponse<PageResponse<AdminPromotion>> search(@RequestParam(required = false) Boolean active,
                                                             @RequestParam(required = false) Integer page,
                                                             @RequestParam(required = false) Integer size) {
-        return ApiResponse.ok(service.search(active, PageQuery.of(page, size, Sort.by(Sort.Direction.DESC, "id"))));
+        return ApiResponse.ok(service.search(active, PageQuery.of(page, size, PageQuery.ID_DESC)));
     }
 
     @GetMapping("/admin/promotions/{id}")
@@ -112,6 +110,6 @@ public class PromotionController {
     public ApiResponse<PageResponse<UsageResponse>> usages(@PathVariable Long id,
                                                            @RequestParam(required = false) Integer page,
                                                            @RequestParam(required = false) Integer size) {
-        return ApiResponse.ok(service.usages(id, PageQuery.of(page, size, Sort.by(Sort.Direction.DESC, "id"))));
+        return ApiResponse.ok(service.usages(id, PageQuery.of(page, size, PageQuery.ID_DESC)));
     }
 }

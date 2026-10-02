@@ -13,7 +13,6 @@ import com.roti5dao.order.entity.OrderChannel;
 import com.roti5dao.order.service.OrderPaymentService;
 import com.roti5dao.order.service.OrderQueryService;
 import com.roti5dao.order.service.OrderService;
-import com.roti5dao.common.security.AuthUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -52,7 +51,7 @@ public class PublicOrderController {
     @PostMapping("/quote")
     @Operation(summary = "🌐 คำนวณราคาตะกร้า (ไม่บันทึก) รวมโปร/แลกแต้ม/แต้มที่จะได้")
     public ApiResponse<QuoteResponse> quote(@Valid @RequestBody QuoteRequest req) {
-        Long customerId = CurrentUser.get().map(AuthUser::id).orElse(null);
+        Long customerId = CurrentUser.idOrNull();
         return ApiResponse.ok(orderService.quote(req.items(), req.promoCode(), req.redeemPoints(), customerId, OrderChannel.ONLINE));
     }
 

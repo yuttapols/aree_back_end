@@ -1,8 +1,8 @@
 package com.roti5dao.promotion.service;
 
-import com.roti5dao.common.config.AppProperties;
 import com.roti5dao.common.exception.BusinessException;
 import com.roti5dao.common.exception.ErrorCode;
+import com.roti5dao.common.time.BusinessTime;
 import com.roti5dao.common.util.MoneyUtils;
 import com.roti5dao.order.event.OrderEvents.OrderPlacedEvent;
 import com.roti5dao.order.pricing.PricingContext;
@@ -17,9 +17,7 @@ import com.roti5dao.promotion.repository.PromotionRepository;
 import com.roti5dao.promotion.repository.PromotionUsageRepository;
 import com.roti5dao.user.service.CustomerBalanceService;
 import java.math.BigDecimal;
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumMap;
@@ -44,25 +42,22 @@ public class PromotionService {
     private final PromotionUsageRepository usageRepository;
     private final CustomerBalanceService customerLock;
     private final Map<PromotionType, DiscountCalculator> calculators = new EnumMap<>(PromotionType.class);
-    private final Clock clock;
-    private final ZoneId zone;
+    private final BusinessTime time;
 
     public PromotionService(PromotionRepository promotionRepository, PromotionUsageRepository usageRepository,
-                            CustomerBalanceService customerLock, List<DiscountCalculator> calculators, Clock clock,
-                            AppProperties props) {
+                            CustomerBalanceService customerLock, List<DiscountCalculator> calculators, BusinessTime time) {
         this.promotionRepository = promotionRepository;
         this.usageRepository = usageRepository;
         this.customerLock = customerLock;
         calculators.forEach(c -> this.calculators.put(c.type(), c));
-        this.clock = clock;
-        this.zone = props.timezone();
+        this.time = time;
     }
 
     /** เลือกและคำนวณโปรโมชั่นให้ตะกร้า (ไม่มี side effect) */
     @Transactional(readOnly = true)
     public void evaluate(PricingContext ctx) {
         Instant now = ctx.getNow();
-        int dow = now.atZone(zone).getDayOfWeek().getValue();
+        int dow = now.atZone(time.zone()).getDayOfWeek().getValue();
 
         Promotion codePromo = null;
         if (ctx.getPromoCode() != null) {
@@ -152,7 +147,7 @@ public class PromotionService {
             u.setOrderId(e.orderId());
             u.setCustomerId(e.customerId());
             u.setDiscountAmount(a.discountAmount());
-            u.setCreatedAt(Instant.now(clock));
+            u.setCreatedAt(time.now());
             usageRepository.save(u);
         }
     }

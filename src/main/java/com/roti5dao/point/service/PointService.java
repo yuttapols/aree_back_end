@@ -4,7 +4,6 @@ import com.roti5dao.common.audit.SecurityAuditService;
 import com.roti5dao.common.audit.SecurityAuditService.Event;
 import com.roti5dao.common.exception.BusinessException;
 import com.roti5dao.common.exception.ErrorCode;
-import com.roti5dao.common.security.AuthUser;
 import com.roti5dao.common.security.CurrentUser;
 import com.roti5dao.common.setting.SettingKey;
 import com.roti5dao.common.setting.SystemSettingService;
@@ -263,7 +262,7 @@ public class PointService {
         t.setExpiresAt(expiresAt);
         t.setRemark(remark);
         t.setCreatedAt(Instant.now(clock));
-        t.setCreatedBy(CurrentUser.get().map(AuthUser::id).map(id -> "user:" + id).orElse("system"));
+        t.setCreatedBy(CurrentUser.actorOr("system"));
         return repository.save(t);
     }
 }

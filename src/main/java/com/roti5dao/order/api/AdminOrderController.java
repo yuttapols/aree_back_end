@@ -24,7 +24,6 @@ import com.roti5dao.order.service.OrderService;
 import jakarta.validation.Valid;
 import java.time.LocalDate;
 import java.util.List;
-import org.springframework.data.domain.Sort;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -75,7 +74,7 @@ public class AdminOrderController {
                                                            @RequestParam(required = false) Integer page,
                                                            @RequestParam(required = false) Integer size) {
         return ApiResponse.ok(queryService.search(status, channel, date,
-                PageQuery.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))));
+                PageQuery.of(page, size, PageQuery.NEWEST_FIRST)));
     }
 
     @GetMapping("/board")

@@ -2,7 +2,6 @@ package com.roti5dao.order.service;
 
 import com.roti5dao.common.audit.SecurityAuditService;
 import com.roti5dao.common.audit.SecurityAuditService.Event;
-import com.roti5dao.common.config.AppProperties;
 import com.roti5dao.common.exception.BusinessException;
 import com.roti5dao.common.exception.ErrorCode;
 import com.roti5dao.common.exception.NotFoundException;
@@ -10,6 +9,7 @@ import com.roti5dao.common.security.AuthUser;
 import com.roti5dao.common.sequence.DailyCounterService;
 import com.roti5dao.common.setting.SettingKey;
 import com.roti5dao.common.setting.SystemSettingService;
+import com.roti5dao.common.time.BusinessTime;
 import com.roti5dao.common.util.PhoneUtils;
 import com.roti5dao.order.dto.OrderDtos.CartItemRequest;
 import com.roti5dao.order.dto.OrderDtos.OnlineOrderRequest;
@@ -31,8 +31,6 @@ import com.roti5dao.order.pricing.PricingService;
 import com.roti5dao.order.repository.OrderRepository;
 import com.roti5dao.payment.service.PaymentService;
 import com.roti5dao.user.service.UserAccountService;
-import java.time.Clock;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -58,13 +56,12 @@ public class OrderService {
     private final PaymentService paymentService;
     private final ApplicationEventPublisher events;
     private final SecurityAuditService audit;
-    private final Clock clock;
-    private final AppProperties props;
+    private final BusinessTime time;
 
     public OrderService(OrderRepository orderRepository, PricingService pricingService, OrderStatusMachine statusMachine,
                         DailyCounterService counterService, SystemSettingService settings,
                         UserAccountService userAccountService, PaymentService paymentService,
-                        ApplicationEventPublisher events, SecurityAuditService audit, Clock clock, AppProperties props) {
+                        ApplicationEventPublisher events, SecurityAuditService audit, BusinessTime time) {
         this.orderRepository = orderRepository;
         this.pricingService = pricingService;
         this.statusMachine = statusMachine;
@@ -74,8 +71,7 @@ public class OrderService {
         this.paymentService = paymentService;
         this.events = events;
         this.audit = audit;
-        this.clock = clock;
-        this.props = props;
+        this.time = time;
     }
 
     // ---------------------------------------------------------------- quote
@@ -138,7 +134,7 @@ public class OrderService {
                     "ใช้ endpoint นี้เปลี่ยนเป็น PREPARING / READY / COMPLETED เท่านั้น");
         }
         Order order = lock(orderId);
-        statusMachine.transition(order, target, Instant.now(clock));
+        statusMachine.transition(order, target, time.now());
         if (target == OrderStatus.COMPLETED) {
             events.publishEvent(new OrderCompletedEvent(order.getId(), order.getCustomerId(), order.getTotalAmount()));
         }
@@ -150,7 +146,7 @@ public class OrderService {
     @Transactional
     public OrderResponse cancel(Long orderId, String reason, Long staffId) {
         Order order = lock(orderId);
-        statusMachine.transition(order, OrderStatus.CANCELLED, Instant.now(clock));
+        statusMachine.transition(order, OrderStatus.CANCELLED, time.now());
         order.setCancelReason(reason.trim());
         paymentService.voidForCancelledOrder(orderId, staffId);
         events.publishEvent(new OrderCancelledEvent(order.getId(), order.getCustomerId()));
@@ -163,7 +159,7 @@ public class OrderService {
     void confirmIfFullyPaid(Order order) {
         if (order.getStatus() == OrderStatus.PENDING_PAYMENT
                 && paymentService.paidTotal(order.getId()).compareTo(order.getTotalAmount()) >= 0) {
-            statusMachine.transition(order, OrderStatus.CONFIRMED, Instant.now(clock));
+            statusMachine.transition(order, OrderStatus.CONFIRMED, time.now());
         }
     }
 
@@ -183,7 +179,7 @@ public class OrderService {
                 .map(i -> new CartLine(i.productId(), i.quantity(), i.optionItemIds() == null ? List.of() : i.optionItemIds(), i.note()))
                 .toList();
         PricingContext ctx = new PricingContext(channel, customerId, promoCode, redeemPoints == null ? 0 : redeemPoints,
-                Instant.now(clock), cart);
+                time.now(), cart);
         return pricingService.calculate(ctx);
     }
 
@@ -200,7 +196,7 @@ public class OrderService {
 
     private Order persist(PricingContext ctx, OrderChannel channel, Long customerId, String guestName, String guestPhone,
                           String note, Long cashierId) {
-        LocalDate today = LocalDate.now(clock.withZone(props.timezone()));
+        LocalDate today = time.today();
         int running = counterService.next(today, DailyCounterService.ORDER);
         int queue = counterService.next(today, DailyCounterService.QUEUE);
 
@@ -248,7 +244,7 @@ public class OrderService {
 
         // ยอด 0 บาท (ส่วนลดครบ) ไม่ต้องชำระ → ยืนยันทันที
         if (order.getTotalAmount().signum() == 0) {
-            statusMachine.transition(order, OrderStatus.CONFIRMED, Instant.now(clock));
+            statusMachine.transition(order, OrderStatus.CONFIRMED, time.now());
         }
         orderRepository.flush();
         return order;

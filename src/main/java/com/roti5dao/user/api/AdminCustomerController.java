@@ -10,7 +10,6 @@ import com.roti5dao.user.dto.UserDtos.QuickRegisterRequest;
 import com.roti5dao.user.dto.UserDtos.QuickRegisterResponse;
 import com.roti5dao.user.service.CustomerAdminService;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -38,7 +37,7 @@ public class AdminCustomerController {
     public ApiResponse<PageResponse<CustomerSummary>> search(@RequestParam(required = false) String keyword,
                                                              @RequestParam(required = false) Integer page,
                                                              @RequestParam(required = false) Integer size) {
-        return ApiResponse.ok(service.search(keyword, PageQuery.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))));
+        return ApiResponse.ok(service.search(keyword, PageQuery.of(page, size, PageQuery.NEWEST_FIRST)));
     }
 
     @GetMapping("/lookup")

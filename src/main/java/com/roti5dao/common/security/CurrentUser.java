@@ -27,4 +27,18 @@ public final class CurrentUser {
     public static Long requireId() {
         return require().id();
     }
+
+    /** id ของผู้ใช้ที่ login อยู่ หรือ null ถ้าเป็น guest (endpoint public ที่แนบ token ได้แต่ไม่บังคับ) */
+    public static Long idOrNull() {
+        return get().map(AuthUser::id).orElse(null);
+    }
+
+    /** ชื่อผู้กระทำสำหรับ audit/created_by: "user:{id}" หรือ fallback เมื่อไม่มีผู้ใช้ (job/guest) */
+    public static String actorOr(String fallback) {
+        return get().map(u -> actorOf(u.id())).orElse(fallback);
+    }
+
+    public static String actorOf(Long userId) {
+        return "user:" + userId;
+    }
 }
