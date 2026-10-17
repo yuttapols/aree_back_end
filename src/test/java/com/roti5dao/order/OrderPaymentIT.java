@@ -15,13 +15,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
-import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import tools.jackson.databind.JsonNode;
 
 class OrderPaymentIT extends IntegrationTest {
 
-    static final byte[] JPEG = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 16, 'J', 'F', 'I', 'F', 0, 1};
 
     private long eggOptionId(long productId) {
         for (JsonNode g : api.get("/api/v1/public/products/" + productId, null).data().get("optionGroups")) {
@@ -45,9 +42,150 @@ class OrderPaymentIT extends IntegrationTest {
     }
 
     @Test
+    void walkInPayLaterGoesToKitchenAndMustPayBeforeComplete() {
+        String staff = api.newStaff("STAFF").accessToken();
+        long classic = api.productId("โรตีนมข้นน้ำตาล"); // 30 บาท
+
+        Res created = walkIn(staff, Map.of("payLater", true), item(classic, 1));
+        JsonNode o = created.data();
+        assertThat(o.get("status").asString()).isEqualTo("CONFIRMED");
+        assertThat(o.get("payLater").asBoolean()).isTrue();
+        assertThat(o.get("remainingAmount").asDouble()).isEqualTo(30.0);
+        long id = o.get("id").asLong();
+
+        // ขึ้นคิวครัว พร้อมป้ายค้างชำระ
+        JsonNode onBoard = null;
+        for (JsonNode b : api.get("/api/v1/admin/orders/board", staff).data()) {
+            if (b.get("id").asLong() == id) {
+                onBoard = b;
+            }
+        }
+        assertThat(onBoard).isNotNull();
+        assertThat(onBoard.get("payLater").asBoolean()).isTrue();
+
+        api.patch("/api/v1/admin/orders/" + id + "/status", staff, Map.of("status", "PREPARING"));
+        api.patch("/api/v1/admin/orders/" + id + "/status", staff, Map.of("status", "READY"));
+        // ยังไม่จ่าย → ปิดออเดอร์ไม่ได้
+        assertThat(api.patch("/api/v1/admin/orders/" + id + "/status", staff, Map.of("status", "COMPLETED")).errorCode())
+                .isEqualTo("ORDER_INVALID_STATUS");
+
+        // รับเงินระหว่างอยู่ในคิว → ป้ายหาย สถานะไม่ถอยกลับ
+        Res paid = api.post("/api/v1/admin/orders/" + id + "/payments", staff, Map.of("methodCode", "CASH", "cashReceived", 50));
+        assertThat(paid.data().get("payLater").asBoolean()).isFalse();
+        assertThat(paid.data().get("status").asString()).isEqualTo("READY");
+        assertThat(paid.data().get("payments").get(0).get("changeAmount").asDouble()).isEqualTo(20.0);
+        assertThat(api.patch("/api/v1/admin/orders/" + id + "/status", staff, Map.of("status", "COMPLETED")).status())
+                .isEqualTo(200);
+    }
+
+    @Test
+    void todayQueuePayLaterAndOneShotComplete() {
+        String staff = api.newStaff("STAFF").accessToken();
+        long classic = api.productId("โรตีนมข้นน้ำตาล"); // 30
+
+        long pending = walkIn(staff, Map.of(), item(classic, 2)).data().get("id").asLong();   // 60 รอชำระ
+        long paidOne = walkIn(staff, Map.of(), item(classic, 1)).data().get("id").asLong();   // 30 จ่ายครบ
+        api.post("/api/v1/admin/orders/" + paidOne + "/payments", staff, Map.of("methodCode", "CASH"));
+
+        // เปลี่ยนออเดอร์รอชำระ → ยังไม่ชำระ (เข้าคิวครัว)
+        Res pl = api.post("/api/v1/admin/orders/" + pending + "/pay-later", staff, null);
+        assertThat(pl.data().get("status").asString()).isEqualTo("CONFIRMED");
+        assertThat(pl.data().get("payLater").asBoolean()).isTrue();
+        assertThat(api.post("/api/v1/admin/orders/" + paidOne + "/pay-later", staff, null).errorCode())
+                .isEqualTo("ORDER_INVALID_STATUS");
+
+        // รับเงินบางส่วน → remainingAmount ในรายการคิวถูกต้อง
+        api.post("/api/v1/admin/orders/" + pending + "/payments", staff, Map.of("methodCode", "CASH", "amount", 20));
+        JsonNode queue = api.get("/api/v1/admin/orders?queue=true&date=2026-09-23&size=100", staff).data().get("items");
+        JsonNode card = null;
+        int lastQueueNo = -1;
+        for (JsonNode o : queue) {
+            assertThat(o.get("queueNo").asInt()).isGreaterThan(lastQueueNo); // เรียงตามเลขคิว
+            lastQueueNo = o.get("queueNo").asInt();
+            assertThat(o.get("id").asLong()).isNotEqualTo(paidOne);          // จ่ายครบแล้วไม่อยู่ในคิว
+            if (o.get("id").asLong() == pending) {
+                card = o;
+            }
+        }
+        assertThat(card).isNotNull();
+        assertThat(card.get("remainingAmount").asDouble()).isEqualTo(40.0);
+
+        // ยังค้างเงิน → ปิดไม่ได้ · จ่ายครบแล้วปิดได้ในครั้งเดียวจาก CONFIRMED
+        assertThat(api.post("/api/v1/admin/orders/" + pending + "/complete", staff, null).errorCode())
+                .isEqualTo("ORDER_INVALID_STATUS");
+        api.post("/api/v1/admin/orders/" + pending + "/payments", staff, Map.of("methodCode", "CASH"));
+        Res done = api.post("/api/v1/admin/orders/" + pending + "/complete", staff, null);
+        assertThat(done.data().get("status").asString()).isEqualTo("COMPLETED");
+        assertThat(done.data().get("completedAt").isNull()).isFalse();
+        assertThat(api.post("/api/v1/admin/orders/" + paidOne + "/complete", staff, null).data().get("status").asString())
+                .isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void staffAddsUpdatesAndRemovesOrderItems() {
+        String staff = api.newStaff("STAFF").accessToken();
+        long classic = api.productId("โรตีนมข้นน้ำตาล"); // 30
+        long banana = api.productId("โรตีกล้วยหอม");     // 45
+        long egg = eggOptionId(classic);                   // +10
+
+        long id = walkIn(staff, Map.of(), item(classic, 1)).data().get("id").asLong();
+
+        // เพิ่ม
+        Res added = api.post("/api/v1/admin/orders/" + id + "/items", staff, item(banana, 2));
+        assertThat(added.status()).isEqualTo(201);
+        assertThat(added.data().get("totalAmount").asDouble()).isEqualTo(120.0);
+        assertThat(added.data().get("items").size()).isEqualTo(2);
+        long classicItem = added.data().get("items").get(0).get("id").asLong();
+        long bananaItem = added.data().get("items").get(1).get("id").asLong();
+
+        // แก้: classic เป็น 2 ชิ้น + ไข่ → (30+10)*2 = 80, items id ใหม่หลังคำนวณ
+        Res updated = api.put("/api/v1/admin/orders/" + id + "/items/" + classicItem, staff, item(classic, 2, egg));
+        assertThat(updated.data().get("totalAmount").asDouble()).isEqualTo(170.0);
+
+        // ลบกล้วย (หา id ใหม่จาก response)
+        long newBanana = -1;
+        for (JsonNode i : updated.data().get("items")) {
+            if (i.get("productId").asLong() == banana) {
+                newBanana = i.get("id").asLong();
+            }
+        }
+        Res removed = api.call(org.springframework.http.HttpMethod.DELETE, "/api/v1/admin/orders/" + id + "/items/" + newBanana, staff, null);
+        assertThat(removed.data().get("totalAmount").asDouble()).isEqualTo(80.0);
+        assertThat(removed.data().get("orderNo").asString()).isEqualTo(updated.data().get("orderNo").asString());
+
+        // ลบรายการสุดท้ายไม่ได้ / item ที่ไม่มีอยู่ = 404
+        long last = removed.data().get("items").get(0).get("id").asLong();
+        assertThat(api.call(org.springframework.http.HttpMethod.DELETE, "/api/v1/admin/orders/" + id + "/items/" + last, staff, null)
+                .errorCode()).isEqualTo("INVALID_OPERATION");
+        assertThat(api.call(org.springframework.http.HttpMethod.DELETE, "/api/v1/admin/orders/" + id + "/items/" + bananaItem, staff, null)
+                .status()).isEqualTo(404);
+
+        // จ่ายครบ 80 → CONFIRMED แล้วเพิ่มของ → ยอดเพิ่ม กลายเป็นค้างชำระ
+        api.post("/api/v1/admin/orders/" + id + "/payments", staff, Map.of("methodCode", "CASH", "cashReceived", 80));
+        Res more = api.post("/api/v1/admin/orders/" + id + "/items", staff, item(classic, 1));
+        assertThat(more.data().get("status").asString()).isEqualTo("CONFIRMED");
+        assertThat(more.data().get("payLater").asBoolean()).isTrue();
+        assertThat(more.data().get("remainingAmount").asDouble()).isEqualTo(30.0);
+
+        // ลดยอดต่ำกว่าที่จ่ายแล้วไม่ได้
+        long extra = more.data().get("items").get(1).get("id").asLong();
+        long first = more.data().get("items").get(0).get("id").asLong();
+        assertThat(api.call(org.springframework.http.HttpMethod.DELETE, "/api/v1/admin/orders/" + id + "/items/" + first, staff, null)
+                .errorCode()).isEqualTo("PAYMENT_AMOUNT_MISMATCH");
+        // เอาส่วนที่เพิ่มออก → กลับมาจ่ายครบ ป้ายค้างชำระหาย
+        Res back = api.call(org.springframework.http.HttpMethod.DELETE, "/api/v1/admin/orders/" + id + "/items/" + extra, staff, null);
+        assertThat(back.data().get("payLater").asBoolean()).isFalse();
+
+        // ครัวเริ่มทำแล้ว → แก้ไม่ได้
+        api.patch("/api/v1/admin/orders/" + id + "/status", staff, Map.of("status", "PREPARING"));
+        assertThat(api.post("/api/v1/admin/orders/" + id + "/items", staff, item(classic, 1)).errorCode())
+                .isEqualTo("ORDER_INVALID_STATUS");
+    }
+
+    @Test
     void walkInGuestPaysCashAndGetsChange() {
         var staff = api.newStaff("STAFF");
-        long classic = api.productId("RT-CLASSIC"); // 30 บาท
+        long classic = api.productId("โรตีนมข้นน้ำตาล"); // 30 บาท
         long egg = eggOptionId(classic);          // +10
 
         Res order = walkIn(staff.accessToken(), Map.of(), item(classic, 2, egg));
@@ -79,7 +217,7 @@ class OrderPaymentIT extends IntegrationTest {
     @Test
     void invalidStatusTransitionsRejected() {
         var staff = api.newStaff("STAFF");
-        long id = walkIn(staff.accessToken(), Map.of(), item(api.productId("DK-MILO"), 1)).data().get("id").asLong();
+        long id = walkIn(staff.accessToken(), Map.of(), item(api.productId("ไมโลเย็น"), 1)).data().get("id").asLong();
 
         assertThat(api.patch("/api/v1/admin/orders/" + id + "/status", staff.accessToken(), Map.of("status", "READY"))
                 .errorCode()).isEqualTo("ORDER_INVALID_STATUS");
@@ -96,8 +234,8 @@ class OrderPaymentIT extends IntegrationTest {
     }
 
     @Test
-    void onlineGuestUploadsSlipAndStaffApproves() {
-        long banana = api.productId("RT-BANANA"); // 45
+    void onlineGuestSelectsMethodAndStaffApproves() {
+        long banana = api.productId("โรตีกล้วยหอม"); // 45
         Res created = api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(banana, 2)),
                 "guestName", "คุณเอ", "guestPhone", "081-234-5678"));
         assertThat(created.status()).isEqualTo(201);
@@ -108,24 +246,16 @@ class OrderPaymentIT extends IntegrationTest {
         assertThat(track.data().get("maskedPhone").asString()).isEqualTo("081-xxx-5678");
         assertThat(track.data().has("trackingToken")).isFalse();
 
-        // ออนไลน์เลือกเงินสดไม่ได้, ต้องแนบสลิป
-        assertThat(slip(token, "CASH", JPEG).errorCode()).isEqualTo("PAYMENT_METHOD_UNAVAILABLE");
-        assertThat(slip(token, "PROMPTPAY", null).errorCode()).isEqualTo("SLIP_REQUIRED");
+        // ออนไลน์เลือกเงินสดไม่ได้ — เลือกช่องทางอย่างเดียว ไม่มีสลิป
+        assertThat(pay(token, "CASH").errorCode()).isEqualTo("PAYMENT_METHOD_UNAVAILABLE");
 
-        Res submitted = slip(token, "PROMPTPAY", JPEG);
+        Res submitted = pay(token, "PROMPTPAY");
         assertThat(submitted.status()).isEqualTo(201);
         assertThat(submitted.data().get("payments").get(0).get("status").asString()).isEqualTo("PENDING");
 
         var staff = api.newStaff("STAFF");
         long paymentId = findPending(staff.accessToken(), created.data().get("orderNo").asString());
 
-        // สลิปดูได้เฉพาะพนักงาน
-        var slipRes = api.get("/api/v1/admin/payments/" + paymentId + "/slip", staff.accessToken()).raw().getResponse();
-        assertThat(slipRes.getStatus()).isEqualTo(200);
-        assertThat(slipRes.getContentType()).isEqualTo("image/jpeg");
-        assertThat(slipRes.getHeader("Cache-Control")).contains("no-store");
-        assertThat(api.get("/api/v1/admin/payments/" + paymentId + "/slip", api.newCustomer().accessToken()).status()).isEqualTo(403);
-        assertThat(api.get("/api/v1/admin/payments/" + paymentId + "/slip", null).status()).isEqualTo(401);
 
         Res approved = api.patch("/api/v1/admin/payments/" + paymentId + "/verify", staff.accessToken(), Map.of("approve", true));
         assertThat(approved.data().get("status").asString()).isEqualTo("PAID");
@@ -137,11 +267,11 @@ class OrderPaymentIT extends IntegrationTest {
     }
 
     @Test
-    void rejectedSlipKeepsOrderPending() {
-        Res created = api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(api.productId("DK-THAITEA"), 1)),
+    void rejectedPaymentKeepsOrderPending() {
+        Res created = api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(api.productId("ชาชัก"), 1)),
                 "guestName", "คุณบี", "guestPhone", "0891112222"));
         String token = created.data().get("trackingToken").asString();
-        slip(token, "TRANSFER", JPEG);
+        pay(token, "TRANSFER");
         var staff = api.newStaff("STAFF");
         long paymentId = findPending(staff.accessToken(), created.data().get("orderNo").asString());
 
@@ -156,20 +286,20 @@ class OrderPaymentIT extends IntegrationTest {
     }
 
     @Test
-    void slipSpamLimited() {
-        Res created = api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(api.productId("DK-THAITEA"), 1)),
+    void pendingPaymentSpamLimited() {
+        Res created = api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(api.productId("ชาชัก"), 1)),
                 "guestName", "spam", "guestPhone", "0891113333"));
         String token = created.data().get("trackingToken").asString();
         for (int i = 0; i < 3; i++) {
-            assertThat(slip(token, "TRANSFER", JPEG).status()).isEqualTo(201);
+            assertThat(pay(token, "TRANSFER").status()).isEqualTo(201);
         }
-        assertThat(slip(token, "TRANSFER", JPEG).errorCode()).isEqualTo("TOO_MANY_PENDING_PAYMENTS");
+        assertThat(pay(token, "TRANSFER").errorCode()).isEqualTo("TOO_MANY_PENDING_PAYMENTS");
     }
 
     @Test
     void mixedPaymentCashPlusCard() {
         var staff = api.newStaff("STAFF");
-        long id = walkIn(staff.accessToken(), Map.of(), item(api.productId("MT-BEEF"), 1)).data().get("id").asLong(); // 80
+        long id = walkIn(staff.accessToken(), Map.of(), item(api.productId("มะตะบะเนื้อ"), 1)).data().get("id").asLong(); // 80
 
         assertThat(api.post("/api/v1/admin/orders/" + id + "/payments", staff.accessToken(),
                 Map.of("methodCode", "CASH", "amount", 100)).errorCode()).isEqualTo("PAYMENT_AMOUNT_MISMATCH");
@@ -191,8 +321,8 @@ class OrderPaymentIT extends IntegrationTest {
 
     @Test
     void serverComputesPriceAndValidatesOptions() {
-        long classic = api.productId("RT-CLASSIC");
-        long curry = api.productId("RT-CURRY");
+        long classic = api.productId("โรตีนมข้นน้ำตาล");
+        long curry = api.productId("โรตีแกงกะหรี่ไก่");
         long egg = eggOptionId(classic);
 
         // ราคาที่ client แอบส่งมาถูกละเลย
@@ -223,9 +353,9 @@ class OrderPaymentIT extends IntegrationTest {
         Res lookup = api.get("/api/v1/admin/customers/lookup?phone=" + phone, staff.accessToken());
         assertThat(lookup.data().get("userId").asLong()).isEqualTo(customer.userId());
 
-        Res order = walkIn(staff.accessToken(), Map.of("customerPhone", phone), item(api.productId("DK-MILO"), 1));
+        Res order = walkIn(staff.accessToken(), Map.of("customerPhone", phone), item(api.productId("ไมโลเย็น"), 1));
         assertThat(order.data().get("customer").get("id").asLong()).isEqualTo(customer.userId());
-        assertThat(walkIn(staff.accessToken(), Map.of("customerPhone", "0870000000"), item(api.productId("DK-MILO"), 1))
+        assertThat(walkIn(staff.accessToken(), Map.of("customerPhone", "0870000000"), item(api.productId("ไมโลเย็น"), 1))
                 .errorCode()).isEqualTo("NOT_FOUND");
     }
 
@@ -243,7 +373,7 @@ class OrderPaymentIT extends IntegrationTest {
     @Test
     void cancelConfirmedOrderRefundsPayments() {
         var staff = api.newStaff("STAFF");
-        long id = walkIn(staff.accessToken(), Map.of(), item(api.productId("DK-MILO"), 1)).data().get("id").asLong();
+        long id = walkIn(staff.accessToken(), Map.of(), item(api.productId("ไมโลเย็น"), 1)).data().get("id").asLong();
         api.post("/api/v1/admin/orders/" + id + "/payments", staff.accessToken(), Map.of("methodCode", "CASH"));
         Res cancelled = api.post("/api/v1/admin/orders/" + id + "/cancel", staff.accessToken(), Map.of("reason", "ของหมด"));
         assertThat(cancelled.data().get("status").asString()).isEqualTo("CANCELLED");
@@ -255,7 +385,7 @@ class OrderPaymentIT extends IntegrationTest {
         String admin = api.adminToken();
         api.put("/api/v1/admin/settings", admin, Map.of("values", Map.of("shop.accept_online_order", "false")));
         try {
-            Res r = api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(api.productId("DK-MILO"), 1)),
+            Res r = api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(api.productId("ไมโลเย็น"), 1)),
                     "guestName", "x", "guestPhone", "0812345678"));
             assertThat(r.errorCode()).isEqualTo("ONLINE_ORDER_CLOSED");
         } finally {
@@ -270,7 +400,7 @@ class OrderPaymentIT extends IntegrationTest {
     @Test
     void orderNumbersUniqueUnderConcurrency() throws Exception {
         var staff = api.newStaff("STAFF");
-        long milo = api.productId("DK-MILO");
+        long milo = api.productId("ไมโลเย็น");
         ExecutorService pool = Executors.newFixedThreadPool(8);
         try {
             List<Callable<Res>> tasks = new ArrayList<>();
@@ -292,12 +422,8 @@ class OrderPaymentIT extends IntegrationTest {
         }
     }
 
-    private Res slip(String token, String method, byte[] bytes) {
-        var b = MockMvcRequestBuilders.multipart("/api/v1/public/orders/track/" + token + "/payments").param("methodCode", method);
-        if (bytes != null) {
-            b.file(new MockMultipartFile("slip", "slip.jpg", "image/jpeg", bytes));
-        }
-        return api.perform(b, null, null);
+    private Res pay(String token, String method) {
+        return api.post("/api/v1/public/orders/track/" + token + "/payments", null, Map.of("methodCode", method));
     }
 
     private long findPending(String staffToken, String orderNo) {

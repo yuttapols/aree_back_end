@@ -44,7 +44,7 @@ Swagger UI ดูได้ที่ `/swagger-ui.html` (เปิดเฉพา
 | PromotionScope | `ORDER`, `PRODUCT`, `CATEGORY` |
 | PromotionChannel | `ALL`, `WALK_IN`, `ONLINE` |
 | GroupBy (dashboard) | `DAY`, `WEEK`, `MONTH` |
-| StorageFolder | `PRODUCTS`, `AVATARS`, `BANNERS` (`SLIPS` อัปโหลดไม่ได้ผ่าน /files) |
+| StorageFolder | `PRODUCTS`, `AVATARS`, `BANNERS` |
 
 **สัญลักษณ์สิทธิ์:** 🌐 ไม่ต้อง login · 👤 login ทุก role · 🧑‍🍳 STAFF+ADMIN · 👑 ADMIN เท่านั้น
 
@@ -101,7 +101,7 @@ Swagger UI ดูได้ที่ `/swagger-ui.html` (เปิดเฉพา
 | POST | `/public/orders/quote` | คำนวณราคาตะกร้า (ไม่บันทึก) | `QuoteRequest` | `QuoteResponse` |
 | POST | `/public/orders` | สร้างออเดอร์ ONLINE (201) | `OnlineOrderRequest` | `OrderResponse` |
 | GET | `/public/orders/track/{trackingToken}` | ติดตามออเดอร์ | UUID | `TrackResponse` |
-| POST | `/public/orders/track/{trackingToken}/payments` | แนบสลิป (201) **multipart/form-data** | ดูด้านล่าง | `TrackResponse` |
+| POST | `/public/orders/track/{trackingToken}/payments` | แจ้งช่องทางชำระเงิน (201) JSON — ไม่มีสลิป | `OnlinePaymentRequest` | `TrackResponse` |
 | GET | `/files/**` | ดูรูปสาธารณะ (products/avatars/banners) | – | ไฟล์รูป |
 
 **หมายเหตุ /public/orders/*:** ถ้าแนบ `Authorization: Bearer` จะผูกออเดอร์กับสมาชิกอัตโนมัติ (ได้แต้ม/ใช้แต้มได้)
@@ -116,7 +116,7 @@ Swagger UI ดูได้ที่ `/swagger-ui.html` (เปิดเฉพา
   "imageUrl":"/files/products/2026/09/<uuid>.jpg", "available":true, "recommended":true, "hasOptions":true }
 // ProductDetail = ProductSummary + categoryName + images[{id,url,sortOrder}] + optionGroups[]
 // OptionGroupResponse
-{ "id":3, "name":"ท็อปปิ้ง", "minSelect":0, "maxSelect":2, "active":true, "sortOrder":0,
+{ "id":3, "name":"ท็อปปิ้ง", "minSelect":0, "maxSelect":2, "defaultSelected":false, "nameEn":null, "active":true, "sortOrder":0,
   "items":[ { "id":31, "name":"นมข้น", "extraPrice":5.00, "available":true, "sortOrder":0 } ] }
 // MenuCategory
 { "category": CategoryResponse, "products": ProductSummary[] }
@@ -151,20 +151,19 @@ Swagger UI ดูได้ที่ `/swagger-ui.html` (เปิดเฉพา
 ```
 **TrackResponse** = มุมมองสาธารณะ (เบอร์ถูกมาสก์ `maskedPhone`, payments เป็น `PublicPaymentResponse` ไม่มีข้อมูลพนักงาน)
 
-**แนบสลิป (multipart):** fields — `methodCode` (จำเป็น, จาก `/public/payment-methods`), `amount?`, `referenceNo?`, `slip` (ไฟล์ JPG/PNG/WEBP ≤ 5MB)
-- ถ้าช่องทางนั้น `requiresSlip=true` แต่ไม่แนบ → `422 SLIP_REQUIRED`; `requiresReference=true` → `422 REFERENCE_REQUIRED`
-- มีสลิปรอตรวจครบ 3 ใบแล้ว → `422 TOO_MANY_PENDING_PAYMENTS`
-- **ห้ามตั้ง `Content-Type` เอง** ให้ browser ใส่ boundary
+**แจ้งช่องทางชำระเงิน (JSON, ไม่มีสลิป):** `OnlinePaymentRequest` = `{ methodCode (จำเป็น, จาก /public/payment-methods), amount?, referenceNo? }` — ร้านตรวจยอดเข้าเองแล้วกดอนุมัติ
+- ช่องทางที่ `requiresReference=true` แต่ไม่ส่ง `referenceNo` → `422 REFERENCE_REQUIRED`
+- มีรายการรอตรวจครบ 3 รายการแล้ว → `422 TOO_MANY_PENDING_PAYMENTS`
 
 **Flow สั่งออนไลน์ที่ FE ต้องทำ**
 1. โหลด `/public/shop-info` → ถ้า `acceptOnlineOrder=false` หรือ `openNow=false` แสดงว่าปิดรับ (ถ้ายิงสร้างจะได้ `422 ONLINE_ORDER_CLOSED`)
 2. โหลด `/public/menu` → ผู้ใช้เลือกสินค้า/ตัวเลือก (บังคับ minSelect/maxSelect ที่ UI)
 3. ทุกครั้งที่ตะกร้า/โค้ด/แต้มเปลี่ยน → `POST /public/orders/quote` แล้วแสดงยอดจากผลลัพธ์
 4. `POST /public/orders` → เก็บ `trackingToken` (guest ให้เก็บใน URL/หน้า track เพราะไม่มี login)
-5. เลือกช่องทางชำระ (`/public/payment-methods`, แสดง `promptPayId`/`bankAccount`/`instruction`) → แนบสลิปที่ `/track/{token}/payments`
+5. เลือกช่องทางชำระ (`/public/payment-methods`, แสดง `promptPayId`/`bankAccount`/`instruction`) → แจ้งช่องทางที่เลือกที่ `/track/{token}/payments` (ไม่ต้องแนบสลิป)
 6. หน้า Track: poll `/track/{token}` (แนะนำทุก 10–15 วินาที) แสดง `status`, `queueNo`, สถานะแต่ละ payment (`REJECTED` แสดง `rejectReason` ให้แนบใหม่)
 
-**สถานะออเดอร์:** `PENDING_PAYMENT → CONFIRMED (ยอดครบ/พนักงานอนุมัติสลิป) → PREPARING → READY → COMPLETED`, ยกเลิกได้ → `CANCELLED`
+**สถานะออเดอร์:** `PENDING_PAYMENT → CONFIRMED (ยอดครบ/พนักงานตรวจยอดเข้าแล้วอนุมัติ) → PREPARING → READY → COMPLETED`, ยกเลิกได้ → `CANCELLED`
 
 ---
 
@@ -201,17 +200,22 @@ userId มาจาก token เสมอ ห้ามส่งจาก client
 
 ---
 
-## 5. พนักงานหน้าร้าน (POS / ครัว / ตรวจสลิป) — 🧑‍🍳 STAFF + ADMIN
+## 5. พนักงานหน้าร้าน (POS / ครัว / ตรวจการชำระเงิน) — 🧑‍🍳 STAFF + ADMIN
 
 ### 5.1 POS / ออเดอร์ `/admin/orders`
 | Method | Path | ทำอะไร | Request | Response |
 |---|---|---|---|---|
 | POST | `/admin/orders/quote` | POS คำนวณราคา (ใส่ `customerPhone` เพื่อใช้สิทธิ์สมาชิก) | `AdminQuoteRequest` | `QuoteResponse` |
 | POST | `/admin/orders` | เปิดบิล WALK_IN (201) | `WalkInOrderRequest` | `OrderResponse` |
-| GET | `/admin/orders` | รายการออเดอร์ (paging) | `status?, channel?, date? (YYYY-MM-DD), page, size` | `PageResponse<OrderListItem>` |
+| GET | `/admin/orders` | รายการออเดอร์ (paging) — **`queue=true`** = คิวที่ยังไม่ปิด (PENDING_PAYMENT หรือ payLater ที่ยังไม่ COMPLETED/CANCELLED) เรียงตาม `queueNo` น้อย→มาก (ไม่สน `status`) | `status?, channel?, date? (YYYY-MM-DD), queue?, page, size` | `PageResponse<OrderListItem>` |
 | GET | `/admin/orders/board` | คิวครัววันนี้ (CONFIRMED/PREPARING/READY) | – | `BoardItem[]` |
 | GET | `/admin/orders/{id}` | รายละเอียดออเดอร์ | – | `OrderResponse` |
 | POST | `/admin/orders/{id}/payments` | รับเงิน (201) จ่ายผสมได้ | `StaffPaymentRequest` | `OrderResponse` |
+| POST | `/admin/orders/{id}/pay-later` | เปลี่ยนเป็น "ยังไม่ชำระ": ได้เฉพาะ `PENDING_PAYMENT` → `CONFIRMED` (เข้าคิวครัว) + `payLater=true` · ใช้ได้ทั้ง WALK_IN/ONLINE · payment PENDING ที่ค้างอยู่คงไว้ | – | `OrderResponse` |
+| POST | `/admin/orders/{id}/complete` | **ปิดออเดอร์ทีเดียว** `CONFIRMED`/`PREPARING`/`READY` → `COMPLETED` ใน transaction เดียว · ต้องชำระครบ (`payLater=false`) ไม่งั้น `422 ORDER_INVALID_STATUS` | – | `OrderResponse` |
+| POST | `/admin/orders/{id}/items` | เพิ่มรายการ (201) — เฉพาะ WALK_IN, สถานะ PENDING_PAYMENT/CONFIRMED, ไม่ได้ใช้แต้มแลก · คำนวณราคาใหม่ทั้งบิล | `CartItemRequest` | `OrderResponse` |
+| PUT | `/admin/orders/{id}/items/{itemId}` | แก้รายการ (เงื่อนไขเดียวกัน) | `CartItemRequest` | `OrderResponse` |
+| DELETE | `/admin/orders/{id}/items/{itemId}` | ลบรายการ (ลบรายการสุดท้ายไม่ได้) | – | `OrderResponse` |
 | PATCH | `/admin/orders/{id}/status` | เปลี่ยนสถานะ → `PREPARING` / `READY` / `COMPLETED` | `{ "status": "PREPARING" }` | `OrderResponse` |
 | POST | `/admin/orders/{id}/cancel` | ยกเลิก (คืนเงิน/แต้ม/โควต้าโปร) | `{ "reason": "..." }` (จำเป็น) | `OrderResponse` |
 | GET | `/admin/orders/{id}/receipt` | ข้อมูลใบเสร็จสำหรับพิมพ์ | – | `ReceiptResponse` |
@@ -220,14 +224,20 @@ userId มาจาก token เสมอ ห้ามส่งจาก client
 // AdminQuoteRequest
 { "items":[CartItemRequest], "promoCode?", "redeemPoints?", "customerPhone?" }
 // WalkInOrderRequest
-{ "items":[CartItemRequest], "promoCode?", "redeemPoints?", "customerPhone?", "guestName?", "note?" }
+{ "items":[CartItemRequest], "promoCode?", "redeemPoints?", "customerPhone?", "guestName?", "note?",
+  "payLater?": true /* "ยังไม่ชำระ": เข้าคิวครัวทันที (CONFIRMED) เก็บเงินทีหลังผ่าน /payments */ }
+// OrderListItem
+{ "id","orderNo","channel","status","queueNo","customerName","member","totalAmount",
+  "remainingAmount" /* ยอดค้าง = total − ที่ PAID แล้ว */, "createdAt","payLater" }
+// OrderResponse.items[] = Line { "id" /* itemId สำหรับแก้/ลบ — เปลี่ยนใหม่ทุกครั้งที่แก้ */, "productId", ...,
+//   "options":[{ "optionItemId","groupName","name","extraPrice" }] }
 // StaffPaymentRequest — amount ว่าง = ชำระยอดคงค้างทั้งหมด, CASH ส่ง cashReceived เพื่อให้ระบบคำนวณเงินทอน
 { "methodCode":"CASH", "amount?":100.00, "cashReceived?":500.00, "referenceNo?":"" }
 // PaymentResponse
-{ "id","orderId","methodCode","methodName","amount","cashReceived","changeAmount","referenceNo","hasSlip",
+{ "id","orderId","methodCode","methodName","amount","cashReceived","changeAmount","referenceNo",
   "status","paidAt","verifiedBy","rejectReason","createdAt" }
 // BoardItem
-{ "id","orderNo","channel","status","queueNo","customerName","items":[Line],"note","createdAt","confirmedAt" }
+{ "id","orderNo","channel","status","queueNo","customerName","items":[Line],"note","createdAt","confirmedAt","payLater" }
 // ReceiptResponse
 { "shopName","shopPhone","order":OrderResponse,"cashierName","printedAt" }
 ```
@@ -235,17 +245,14 @@ userId มาจาก token เสมอ ห้ามส่งจาก client
 ปุ่มเปลี่ยนสถานะตามลำดับที่ถูกต้อง — ถ้าผิดลำดับจะได้ `422 ORDER_INVALID_STATUS`), ใบเสร็จเรียก `window.print()` จาก `ReceiptResponse`
 ยอด `PAYMENT_AMOUNT_MISMATCH` ให้แสดงข้อความและให้กรอกใหม่
 
-### 5.2 ตรวจสลิป `/admin/payments`
+### 5.2 ตรวจการชำระเงิน `/admin/payments` (ร้านเช็กยอดเข้าในแอปธนาคารเอง)
 | Method | Path | ทำอะไร | Request | Response |
 |---|---|---|---|---|
 | GET | `/admin/payments` | รายการชำระเงิน (`status=PENDING` = รอตรวจ) | `status?, page, size` | `PageResponse<PendingPaymentItem>` |
-| PATCH | `/admin/payments/{id}/verify` | อนุมัติ/ปฏิเสธสลิป — ยอดครบ → ออเดอร์เป็น CONFIRMED | `{ "approve": true, "rejectReason?": "..." }` | `PaymentResponse` |
-| GET | `/admin/payments/{id}/slip` | ดูรูปสลิป (private, no-store) | – | ไฟล์รูป |
+| PATCH | `/admin/payments/{id}/verify` | อนุมัติ/ปฏิเสธ — ยอดครบ → ออเดอร์เป็น CONFIRMED | `{ "approve": true, "rejectReason?": "..." }` | `PaymentResponse` |
 
 - `PendingPaymentItem` = `{ payment:PaymentResponse, orderId, orderNo, orderStatus, orderTotal, customerName }`
-- ⚠️ `/admin/payments/{id}/slip` ต้องแนบ Bearer → **`<img src>` ตรงๆ ใช้ไม่ได้** ให้ดึงด้วย HttpClient `responseType: 'blob'`
-  แล้วสร้าง `URL.createObjectURL()` (และ revoke เมื่อปิด dialog) ห้าม cache/เก็บรูปสลิปถาวร
-- ปฏิเสธสลิปควรบังคับกรอก `rejectReason` ที่ UI
+- ปฏิเสธควรบังคับกรอก `rejectReason` ที่ UI
 
 ### 5.3 ลูกค้าหน้าร้าน `/admin/customers`
 | Method | Path | ทำอะไร | Request | Response |
@@ -283,13 +290,18 @@ userId มาจาก token เสมอ ห้ามส่งจาก client
 ห้ามใส่ URL ภายนอกหรือ `javascript:` → ไม่งั้นได้ `400 VALIDATION_ERROR`. แสดงรูปด้วย `{API_HOST}` + url
 รูปถูก cache 30 วัน (immutable) จึงไม่ต้อง cache-bust เอง
 
+> **ลบ ≠ ปิดใช้งาน** (ใช้กับหมวด, สินค้า, กลุ่มตัวเลือก, โปรโมชั่น)
+> - ปิดใช้งาน = ส่ง `active:false` ใน PUT → ลูกค้าไม่เห็น แต่หลังบ้านยังเห็นและเปิดกลับได้ → UI ใช้สวิตช์
+> - ลบ = `DELETE` → หายจากทุกหน้าจอ (รวมหลังบ้าน) เปิดกลับไม่ได้ รหัส/slug นำกลับมาใช้ใหม่ได้ → UI ใช้ปุ่ม 🗑 + ยืนยัน แสดงได้ทุกแถวไม่ว่าเปิดหรือปิดอยู่
+> - ยอดขาย/ออเดอร์ย้อนหลังของรายการที่ลบยังอยู่ครบ
+
 ### 6.2 หมวดหมู่ `/admin/categories`
 | Method | Path | ทำอะไร | Request | Response |
 |---|---|---|---|---|
 | GET | `/admin/categories` | หมวดทั้งหมด (รวมที่ปิด) | – | `CategoryResponse[]` |
 | POST | `/admin/categories` | สร้าง (201) | `CategoryUpsertRequest` | `CategoryResponse` |
 | PUT | `/admin/categories/{id}` | แก้ | `CategoryUpsertRequest` | `CategoryResponse` |
-| DELETE | `/admin/categories/{id}` | ปิดหมวด (soft delete) | – | `null` |
+| DELETE | `/admin/categories/{id}` | **ลบ** หมวด (ต้องไม่มีสินค้าเหลือ ไม่งั้น 422 `INVALID_OPERATION`) | – | `null` |
 | PATCH | `/admin/categories/sort` | จัดลำดับ (≤500) | `[{ "id":1, "sortOrder":0 }]` | `CategoryResponse[]` |
 
 `CategoryUpsertRequest` = `{ name (≤100), slug (a-z0-9 และ - เท่านั้น เช่น "roti-wan"), description? (≤500), icon? (a-zA-Z0-9 _-), sortOrder (0..100000), active }`
@@ -300,20 +312,23 @@ userId มาจาก token เสมอ ห้ามส่งจาก client
 |---|---|---|---|---|
 | POST | `/admin/products` | สร้างสินค้า (201) | `ProductUpsertRequest` | `AdminProductResponse` |
 | PUT | `/admin/products/{id}` | แก้สินค้า | `ProductUpsertRequest` | `AdminProductResponse` |
-| DELETE | `/admin/products/{id}` | ปิดสินค้า (soft delete) | – | `null` |
+| DELETE | `/admin/products/{id}` | **ลบ** สินค้า | – | `null` |
 | POST | `/admin/products/{id}/images` | เพิ่มรูปแกลเลอรี (multipart `file`, สูงสุด 10 รูป) | form-data | `AdminProductResponse` |
 | DELETE | `/admin/products/{id}/images/{imageId}` | ลบรูป | – | `AdminProductResponse` |
 | PUT | `/admin/products/{id}/option-groups` | ผูกกลุ่มตัวเลือก (**แทนที่ทั้งหมด**, ≤20) | `[{ "optionGroupId":3, "sortOrder":0 }]` | `AdminProductResponse` |
 
 ```jsonc
 // ProductUpsertRequest
-{ "categoryId":1, "code":"ROTI-01" /* A-Z0-9_- ขึ้นต้นด้วย A-Z/0-9, ≤30 */, "name":"โรตีไข่ (≤150)", "description?":"",
+{ "categoryId":1, "name":"โรตีไข่ (≤150)", "nameEn?":"Egg roti (≤150)", "description?":"", "descriptionEn?":"" ,
+  "originalPrice?":45.00 /* ราคาก่อนลด แสดงขีดฆ่า ต้อง > price */, "badge?":"new" /* bestseller | new | recommended | null */,
   "price":35.00 /* 0..99999.99 ทศนิยม ≤2 */, "imageUrl?":"/files/products/...", "available":true, "recommended":false,
   "active":true, "sortOrder":0 }
 // AdminProductResponse = ProductDetail + { active, sortOrder, updatedAt }
+// ProductSummary / ProductDetail / AdminProductResponse คืน nameEn, descriptionEn, originalPrice, badge ด้วย (ไม่มีค่า = null)
+// OptionGroup / OptionItem: request และ response มี nameEn? (≤100)
 ```
 - `available` = มีของ/ของหมด (พนักงานสลับได้), `active` = เปิดขาย/ปิดถาวร (แอดมินเท่านั้น)
-- `code` ซ้ำ → `409 DUPLICATE_VALUE`
+- **`code` ระบบ gen ให้ ห้ามส่ง** = `RT-` + id ประเภท 3 หลัก + id เมนู 4 หลัก (เช่น `RT-0010015`, ยาว 10 ตัว) — gen ตอนสร้างครั้งเดียว **แก้ไม่ได้** (ย้ายหมวดแล้วรหัสคงเดิม) → หน้าสร้างไม่มีช่องรหัส, หน้าแก้แสดงเป็นข้อความอ่านอย่างเดียว
 
 ### 6.4 กลุ่มตัวเลือก `/admin/option-groups`
 | Method | Path | ทำอะไร | Request | Response |
@@ -322,11 +337,11 @@ userId มาจาก token เสมอ ห้ามส่งจาก client
 | GET | `/admin/option-groups/{id}` | รายละเอียด | – | `OptionGroupResponse` |
 | POST | `/admin/option-groups` | สร้าง + items (201) | `OptionGroupUpsertRequest` | `OptionGroupResponse` |
 | PUT | `/admin/option-groups/{id}` | แก้ | `OptionGroupUpsertRequest` | `OptionGroupResponse` |
-| DELETE | `/admin/option-groups/{id}` | ปิดกลุ่ม | – | `null` |
+| DELETE | `/admin/option-groups/{id}` | **ลบ** กลุ่ม (ถอดออกจากทุกสินค้า) | – | `null` |
 
 ```jsonc
 // OptionGroupUpsertRequest — minSelect 0..50, maxSelect 1..50 (ต้อง max ≥ min), items ≤ 50
-{ "name":"ท็อปปิ้ง", "minSelect":0, "maxSelect":2, "active":true, "sortOrder":0,
+{ "name":"ท็อปปิ้ง", "nameEn?":"", "minSelect":0, "maxSelect":2, "defaultSelected?":false /* ติ๊กไว้ให้ก่อน */, "active":true, "sortOrder":0,
   "items":[ { "id":31 /* มี id = แก้, ไม่มี id = เพิ่ม */, "name":"นมข้น", "extraPrice":5.00, "available":true, "sortOrder":0 } ] }
 ```
 ⚠️ **PUT: item ที่มี `id` = แก้, ไม่มี `id` = เพิ่ม, item ที่ไม่ส่งมา = ถูกลบ** — ต้องส่ง items ทั้งหมดกลับเสมอ
@@ -338,7 +353,7 @@ userId มาจาก token เสมอ ห้ามส่งจาก client
 | GET | `/admin/promotions/{id}` | รายละเอียด | – | `AdminPromotion` |
 | POST | `/admin/promotions` | สร้าง (201) | `PromotionUpsertRequest` | `AdminPromotion` |
 | PUT | `/admin/promotions/{id}` | แก้ | `PromotionUpsertRequest` | `AdminPromotion` |
-| DELETE | `/admin/promotions/{id}` | ปิดโปร (soft delete) | – | `null` |
+| DELETE | `/admin/promotions/{id}` | **ลบ** โปร | – | `null` |
 | GET | `/admin/promotions/{id}/usages` | ประวัติการใช้โปร | `page,size` | `PageResponse<UsageResponse>` |
 
 ```jsonc
@@ -356,13 +371,32 @@ userId มาจาก token เสมอ ห้ามส่งจาก client
 - `scope=PRODUCT` ต้องเลือก `productIds`, `scope=CATEGORY` ต้องเลือก `categoryIds`
 - `AdminPromotion` = ฟิลด์ทั้งหมดข้างบน + `id, usedCount, updatedAt`
 
+### 6.5.1 Banner หน้าร้าน `/admin/banners` (แอดมินสร้างเองทุกใบ ไม่สร้างอัตโนมัติจากโปร)
+| Method | Path | ทำอะไร | Request | Response |
+|---|---|---|---|---|
+| GET | `/public/banners?placement=HOME_HERO\|HOME_OFFER` | 🌐 banner ที่ active + อยู่ในช่วง startAt–endAt เรียงตาม sortOrder | – | `PublicBanner[]` |
+| GET | `/admin/banners` | รายการทั้งหมด (รวมที่ปิด/หมดเวลา) | `placement?, active?` | `AdminBanner[]` |
+| GET | `/admin/banners/{id}` | รายละเอียด | – | `AdminBanner` |
+| POST | `/admin/banners/images` | อัปรูป (201) **multipart** field `file` — JPG/PNG/WEBP **≤ 2MB** แนะนำ 1920×800 | – | `{ url }` |
+| POST | `/admin/banners` | สร้าง (201) | `BannerUpsertRequest` | `AdminBanner` |
+| PUT | `/admin/banners/{id}` | แก้ (เปลี่ยนรูป → รูปเก่าถูกลบ) | `BannerUpsertRequest` | `AdminBanner` |
+| PUT | `/admin/banners/order` | จัดลำดับ (ลากวาง) — ส่ง id **ครบทุกใบ** ของ placement บนสุดก่อน | `{ placement, ids:[...] }` | `AdminBanner[]` |
+| DELETE | `/admin/banners/{id}` | ลบ (ลบรูปด้วย) | – | – |
+
+`BannerUpsertRequest` = `{ placement, imageUrl (จำเป็น — url จาก /admin/banners/images), imageUrlMobile?, title? (≤150), titleEn?, subtitle? (≤300), subtitleEn?, ctaLabel? (≤50), ctaLabelEn?, linkUrl? (ขึ้นต้น / หรือ https://), promotionId?, sortOrder? (ว่าง = ต่อท้าย), active, startAt?, endAt? }`
+`PublicBanner` = `{ id, placement, imageUrl, imageUrlMobile, title, titleEn, subtitle, subtitleEn, ctaLabel, ctaLabelEn, linkUrl, promotionId }`
+`AdminBanner` = `PublicBanner` + `{ sortOrder, active, startAt, endAt, createdAt, updatedAt }`
+- คลิก banner: มี `promotionId` → ไป `/promotions/{promotionId}` · ไม่มีก็ใช้ `linkUrl` · ไม่มีทั้งคู่ = ไม่ต้องคลิกได้
+- จอมือถือ: ใช้ `imageUrlMobile` ถ้ามี ไม่งั้นใช้ `imageUrl`
+- รูปหัวการ์ดโปร/หน้ารายละเอียดโปร ใช้ `bannerUrl` ของโปรโมชั่น (ข้อ 6.5) ไม่เกี่ยวกับตารางนี้
+
 ### 6.6 ช่องทางชำระเงิน
 | Method | Path | ทำอะไร | Request | Response |
 |---|---|---|---|---|
 | POST | `/admin/payment-methods` | เพิ่ม (201) | `PaymentMethodUpsertRequest` | `PaymentMethodResponse` |
 | PUT | `/admin/payment-methods/{id}` | แก้ (**แก้ `code` ไม่ได้**) | `PaymentMethodUpsertRequest` | `PaymentMethodResponse` |
 
-`PaymentMethodUpsertRequest` = `{ code (A-Z ตามด้วย A-Z0-9_, ≤30), name (≤100), requiresSlip, requiresReference, allowOnline (ลูกค้าเลือกเองออนไลน์ได้ไหม), instruction? (≤1000), icon?, active, sortOrder }`
+`PaymentMethodUpsertRequest` = `{ code (A-Z ตามด้วย A-Z0-9_, ≤30), name (≤100), requiresReference, allowOnline (ลูกค้าเลือกเองออนไลน์ได้ไหม), instruction? (≤1000), icon?, active, sortOrder }`
 
 ### 6.7 พนักงาน `/admin/staff`
 | Method | Path | ทำอะไร | Request | Response |
@@ -393,7 +427,7 @@ Keys ที่มี: `shop.name`, `shop.phone`, `shop.open_time` (HH:mm), `shop
 ### 6.10 Dashboard `/admin/dashboard/*` (นับเฉพาะออเดอร์ COMPLETED)
 | Method | Path | Query | Response |
 |---|---|---|---|
-| GET | `/summary` | `from,to` (YYYY-MM-DD, จำเป็น) | `{ from,to,orderCount,grossSales,totalDiscount,netSales,averagePerOrder,memberOrderCount,walkInCount,onlineCount,cancelledCount,newMembers,pointsIssued,pointsRedeemed }` |
+| GET | `/summary` | `from,to` (YYYY-MM-DD, จำเป็น) | `{ from,to,orderCount,grossSales,totalDiscount,netSales,averagePerOrder,memberOrderCount,walkInCount,onlineCount,cancelledCount,newMembers,pointsIssued,pointsRedeemed,walkInAmount,onlineAmount,memberAmount,guestAmount }` (Amount = ยอดเงิน net) |
 | GET | `/sales-trend` | `from,to,groupBy=DAY\|WEEK\|MONTH` | `[{ period, orderCount, netSales }]` |
 | GET | `/top-products` | `from,to,limit=10` | `[{ productId, productName, quantity, amount }]` |
 | GET | `/payment-methods` | `from,to` | `[{ methodCode, methodName, paymentCount, amount }]` |
@@ -420,7 +454,7 @@ Keys ที่มี: `shop.name`, `shop.phone`, `shop.open_time` (HH:mm), `shop
 | 422 | `ONLINE_ORDER_CLOSED` | แจ้งร้านปิดรับออนไลน์ |
 | 422 | `PRODUCT_UNAVAILABLE`, `OPTION_INVALID` | รีโหลดเมนู/ตะกร้า แจ้งรายการที่ใช้ไม่ได้ |
 | 422 | `ORDER_INVALID_STATUS` | รีโหลดออเดอร์ (สถานะเปลี่ยนไปแล้ว) |
-| 422 | `PAYMENT_AMOUNT_MISMATCH`, `PAYMENT_METHOD_UNAVAILABLE`, `SLIP_REQUIRED`, `REFERENCE_REQUIRED`, `TOO_MANY_PENDING_PAYMENTS` | แจ้งที่ฟอร์มชำระเงิน |
+| 422 | `PAYMENT_AMOUNT_MISMATCH`, `PAYMENT_METHOD_UNAVAILABLE`, `REFERENCE_REQUIRED`, `TOO_MANY_PENDING_PAYMENTS` | แจ้งที่ฟอร์มชำระเงิน |
 | 422 | `POINT_INSUFFICIENT`, `POINT_BELOW_MIN`, `POINT_EXCEED_LIMIT` | แจ้งที่ช่องแลกแต้ม |
 | 422 | `PROMOTION_NOT_FOUND`, `PROMOTION_EXPIRED`, `PROMOTION_NOT_ELIGIBLE`, `PROMOTION_LIMIT_REACHED` | แจ้งที่ช่องโค้ดโปร (เอาโค้ดออกจากตะกร้าได้) |
 | 422 | `INVALID_OPERATION` | แสดง `error.message` จาก backend |
@@ -442,7 +476,7 @@ Keys ที่มี: `shop.name`, `shop.phone`, `shop.open_time` (HH:mm), `shop
 
 **ความปลอดภัย (ห้ามทำ)**
 - [ ] ไม่เก็บ access token ใน localStorage/sessionStorage/cookie ที่ JS อ่านได้
-- [ ] ไม่ log token, รหัสผ่าน, `temporaryPassword`, เลขบัญชี/สลิป ลง console หรือ analytics
+- [ ] ไม่ log token, รหัสผ่าน, `temporaryPassword`, เลขบัญชี ลง console หรือ analytics
 - [ ] ไม่ render HTML จากข้อมูล API (ชื่อสินค้า/โน้ต/หมายเหตุ) ด้วย `innerHTML` — ใช้ text binding เท่านั้น
 - [ ] ไม่ส่ง `imageUrl` ที่ไม่ได้มาจาก `/files`
 - [ ] ไม่คำนวณราคา/ส่วนลด/แต้มเอง — ใช้ผล `quote` เสมอ (backend เป็นผู้ตัดสินตอนสร้างออเดอร์)
@@ -457,10 +491,17 @@ Keys ที่มี: `shop.name`, `shop.phone`, `shop.open_time` (HH:mm), `shop
 - [ ] ผูก `fields[]` จาก error เข้ากับ Reactive Forms (`setErrors`)
 
 **หน้าจอที่ต้องมี**
-- Public: Landing (menu/promotions/shop-info), Product detail, Cart + โค้ดโปร/แต้ม, Checkout, Track order, Login/Register
+- Public: Landing (สไลด์ HOME_HERO + banner HOME_OFFER จาก `/public/banners`, menu/promotions/shop-info), Product detail, Cart + โค้ดโปร/แต้ม, Checkout, Track order, Login/Register
 - สมาชิก: โปรไฟล์ + avatar, เปลี่ยนรหัสผ่าน, ประวัติออเดอร์, แต้ม (ยอด/ใกล้หมดอายุ/ประวัติ)
-- STAFF: หน้าแรก(today), POS, คิวครัว(board), ออเดอร์, ตรวจสลิป, ลูกค้า (ค้นหา/สมัครหน้าร้าน), ของหมด/มีของ
-- ADMIN: หมวด, สินค้า+รูป+option, กลุ่มตัวเลือก, โปรโมชั่น, ช่องทางชำระ, พนักงาน, ปรับแต้ม, ตั้งค่า, Dashboard
+- STAFF: หน้าแรก(today), POS, คิวครัว(board), ออเดอร์, ตรวจการชำระเงิน, ลูกค้า (ค้นหา/สมัครหน้าร้าน), ของหมด/มีของ
+- ADMIN (= เจ้าของร้าน): หมวด, สินค้า+รูป+option, กลุ่มตัวเลือก, โปรโมชั่น, **จัดการ Banner**, ช่องทางชำระ, พนักงาน, ปรับแต้ม, ตั้งค่า, Dashboard
+
+**หน้าจัดการ Banner (ADMIN เท่านั้น — ซ่อนจาก STAFF)** ดู API ข้อ 6.5.1
+- แท็บแยก 2 ตำแหน่ง: "สไลด์หน้าแรก" (`HOME_HERO`) และ "ข้อเสนอพิเศษ" (`HOME_OFFER`)
+- รายการแสดงรูปย่อ, หัวข้อ, สถานะ (เปิด/ปิด/ยังไม่ถึงเวลา/หมดเวลา — คำนวณจาก `active`, `startAt`, `endAt`), ลากวางเพื่อจัดลำดับ → `PUT /admin/banners/order`
+- ฟอร์มสร้าง/แก้: อัปรูป desktop (จำเป็น) + mobile (ไม่บังคับ) ผ่าน `POST /admin/banners/images` ตรวจ ≤ 2MB ฝั่ง FE ก่อนส่ง แสดงคำแนะนำ 1920×800,
+  ข้อความ TH/EN (หัวข้อ, คำโปรย, ปุ่ม), ลิงก์ = เลือกโปรโมชั่น (dropdown จาก `/admin/promotions`) **หรือ** กรอก URL, ช่วงวันแสดง, สวิตช์เปิด/ปิด
+- พรีวิวก่อนบันทึก (desktop/mobile) และยืนยันก่อนลบ
 
 ---
 
@@ -472,8 +513,8 @@ Keys ที่มี: `shop.name`, `shop.phone`, `shop.open_time` (HH:mm), `shop
 1. **ท็อปปิ้งคือตัวเลือกเสริม ไม่ใช่สินค้าแยก** — แสดงเป็น checkbox/chip ต่อท้ายตอนลูกค้ากำลังปรับแต่งโรตี (เหมือน `optionGroups` ของสินค้าอื่น) ห้ามทำเป็นเมนูให้กดสั่งเดี่ยวๆ ได้เอง
 2. **เลือกท็อปปิ้งซ้ำตัวเดิมไม่ได้** — backend reject ด้วย `OPTION_INVALID` ("เลือกตัวเลือกซ้ำ") ถ้า `optionItemIds` มีเลขซ้ำ → ฝั่ง FE ต้องเก็บเป็น `Set` ของ id ที่เลือก (toggle on/off) ไม่ใช่ list ที่กดเพิ่มได้เรื่อยๆ ถ้าลูกค้าอยากได้ท็อปปิ้งเดิม 2 เท่า ระบบปัจจุบันยังไม่รองรับ (ไม่มี "quantity ต่อท็อปปิ้ง") — ต้องแนะนำให้สั่งเป็นอีกบรรทัดสินค้าแยก
 3. **กลุ่มท็อปปิ้งใช้ร่วมกันทุกเมนูในหมวดโรตี** (shared option group ไม่ได้ custom ต่อชิ้น) — ถ้าแอดมินเพิ่มเมนูโรตีใหม่แล้วไม่ไปผูก option-group ที่หน้า "ผูกกลุ่มตัวเลือกกับสินค้า" (ข้อ 6.3) เมนูนั้นจะไม่มีท็อปปิ้งให้เลือกเลย — ไม่ใช่บั๊ก backend แต่เป็นขั้นตอนที่แอดมินต้องทำเอง ควรเตือนในหน้า admin ตอนสร้างสินค้าใหม่ (เช่น banner "ยังไม่ได้ผูกตัวเลือก")
-4. **⚠️ จุดที่ต้องเช็คกับเจ้าของร้านก่อนขึ้นจริง:** เมนู "โรตี 5 ดาว 15 รส" (code `R5D-SIGNATURE`, 45 บาท) ชื่อสื่อว่าเป็นคอมโบคงที่ (รวมไข่+กล้วย+แยม+ช็อกโกแลตในราคาเดียว) แต่ใน data ปัจจุบันมันถูกผูกกับกลุ่มท็อปปิ้งเหมือนเมนูอื่นทุกตัว — แปลว่าลูกค้าสามารถกดเลือกท็อปปิ้งเพิ่มบนเมนูนี้ได้อีก และจะถูกคิดเงินเพิ่มจาก 45 บาทตามจริง (ไม่ได้ฟรี) ถ้าตั้งใจให้เมนูนี้ "ราคาคงที่ ห้ามเพิ่มท็อปปิ้ง" ต้องแจ้ง backend ให้ถอด option-group ออกจากสินค้านี้ (ผ่าน `PUT /admin/products/{id}/option-groups` ส่ง list ว่าง) — **อย่าแก้ปัญหานี้ด้วยการ hardcode ซ่อน topping picker เฉพาะ code `R5D-SIGNATURE` ฝั่ง FE** เพราะจะไม่ตรงกับสิ่งที่ API อนุญาตจริง (ถ้ายิง order ตรงๆ ผ่าน API อื่นก็ยังเพิ่มได้อยู่ดี) ควรแก้ที่ data ไม่ใช่ที่ UI
+4. **⚠️ จุดที่ต้องเช็คกับเจ้าของร้านก่อนขึ้นจริง:** เมนู "โรตี 5 ดาว 15 รส" (45 บาท) ชื่อสื่อว่าเป็นคอมโบคงที่ (รวมไข่+กล้วย+แยม+ช็อกโกแลตในราคาเดียว) แต่ใน data ปัจจุบันมันถูกผูกกับกลุ่มท็อปปิ้งเหมือนเมนูอื่นทุกตัว — แปลว่าลูกค้าสามารถกดเลือกท็อปปิ้งเพิ่มบนเมนูนี้ได้อีก และจะถูกคิดเงินเพิ่มจาก 45 บาทตามจริง (ไม่ได้ฟรี) ถ้าตั้งใจให้เมนูนี้ "ราคาคงที่ ห้ามเพิ่มท็อปปิ้ง" ต้องแจ้ง backend ให้ถอด option-group ออกจากสินค้านี้ (ผ่าน `PUT /admin/products/{id}/option-groups` ส่ง list ว่าง) — **อย่าแก้ปัญหานี้ด้วยการ hardcode ซ่อน topping picker เฉพาะเมนูนี้ ฝั่ง FE** (หรือ code ของเมนูนี้) เพราะจะไม่ตรงกับสิ่งที่ API อนุญาตจริง (ถ้ายิง order ตรงๆ ผ่าน API อื่นก็ยังเพิ่มได้อยู่ดี) ควรแก้ที่ data ไม่ใช่ที่ UI
 5. **ราคาท็อปปิ้งไม่เท่ากันทุกตัว** (ส่วนใหญ่ 20 บาท แต่ "โอวัลตินลูกเกด" = 25 บาท) — ห้ามตั้ง fix ราคาท็อปปิ้งเป็นค่าคงที่ฝั่ง FE ต้องอ่าน `extraPrice` จาก `OptionItemResponse` และคำนวณยอดจริงผ่าน `quote` เสมอ (ตามกติกาทั่วไปในข้อ 8)
 6. **ท็อปปิ้งที่ของหมด** (`available:false`) ต้อง disable/ขีดฆ่าใน selector ไม่ใช่ซ่อนออกจากรายการ — เพื่อให้ลูกค้าเห็นว่ามีตัวเลือกนี้ปกติแต่หมดวันนี้ (พฤติกรรมเดียวกับสินค้า `available:false`)
 7. สินค้าเมนูนี้ **ยังไม่มีรูป** (`imageUrl: null`) จนกว่าแอดมินจะอัปโหลด — ต้องมี placeholder image ไว้รองรับ ไม่ใช่ปล่อย broken image icon
-8. `code` (เช่น `R5D-EGG`) เป็นค่าที่แอดมินแก้ได้ในอนาคต — ใช้ `id` อ้างอิง logic ถาวร ไม่ใช่ `code` (ยกเว้นกรณีแสดงผล/debug)
+8. `code` (เช่น `RT-0010015`) ระบบ gen แก้ไม่ได้ แต่ ใช้ `id` อ้างอิง logic ถาวร ไม่ใช่ `code` (ยกเว้นกรณีแสดงผล/debug)

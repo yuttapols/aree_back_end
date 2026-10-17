@@ -28,8 +28,6 @@ public class PaymentMethod extends AuditableEntity {
     @Column(nullable = false, length = 100)
     private String name;
 
-    @Column(name = "requires_slip", nullable = false)
-    private boolean requiresSlip;
 
     @Column(name = "requires_reference", nullable = false)
     private boolean requiresReference;

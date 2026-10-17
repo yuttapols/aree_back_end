@@ -1,34 +1,18 @@
 package com.roti5dao.common.storage;
 
-/** โฟลเดอร์เก็บไฟล์ — public เสิร์ฟผ่าน GET /files/** ส่วน private (สลิป) เสิร์ฟผ่าน endpoint ที่ตรวจสิทธิ์เท่านั้น */
+/** โฟลเดอร์เก็บรูป — ทุกโฟลเดอร์เป็นรูปสาธารณะ (ดิสก์เสิร์ฟผ่าน GET /files/**) */
 public enum StorageFolder {
-    PRODUCTS("products", true),
-    AVATARS("avatars", true),
-    BANNERS("banners", true),
-    SLIPS("slips", false);
+    PRODUCTS("products"),
+    AVATARS("avatars"),
+    BANNERS("banners");
 
     private final String dir;
-    private final boolean isPublic;
 
-    StorageFolder(String dir, boolean isPublic) {
+    StorageFolder(String dir) {
         this.dir = dir;
-        this.isPublic = isPublic;
     }
 
     public String dir() {
         return dir;
-    }
-
-    public boolean isPublic() {
-        return isPublic;
-    }
-
-    public static boolean isPublicDir(String dir) {
-        for (StorageFolder f : values()) {
-            if (f.isPublic && f.dir.equals(dir)) {
-                return true;
-            }
-        }
-        return false;
     }
 }

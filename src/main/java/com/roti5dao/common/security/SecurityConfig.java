@@ -73,7 +73,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/admin/dashboard/today").hasAnyRole("STAFF", "ADMIN")
                         .requestMatchers("/api/v1/admin/staff/**", "/api/v1/admin/settings/**",
                                 "/api/v1/admin/categories/**", "/api/v1/admin/option-groups/**",
-                                "/api/v1/admin/promotions/**", "/api/v1/admin/dashboard/**",
+                                "/api/v1/admin/promotions/**", "/api/v1/admin/banners/**", "/api/v1/admin/dashboard/**",
                                 "/api/v1/admin/customers/*/points/adjust").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/admin/products", "/api/v1/admin/products/*/images",
                                 "/api/v1/admin/payment-methods", "/api/v1/files").hasRole("ADMIN")

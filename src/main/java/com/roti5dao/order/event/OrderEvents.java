@@ -23,4 +23,8 @@ public final class OrderEvents {
 
     public record OrderCancelledEvent(Long orderId, Long customerId) {
     }
+
+    /** พนักงานแก้รายการ — คืนโควต้าโปรเดิมก่อนคำนวณใหม่ (แล้วตามด้วย OrderPlacedEvent ของราคาใหม่) */
+    public record OrderItemsChangingEvent(Long orderId) {
+    }
 }

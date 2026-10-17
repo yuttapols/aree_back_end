@@ -1,6 +1,7 @@
 package com.roti5dao.promotion.service;
 
 import com.roti5dao.order.event.OrderEvents.OrderCancelledEvent;
+import com.roti5dao.order.event.OrderEvents.OrderItemsChangingEvent;
 import com.roti5dao.order.event.OrderEvents.OrderPlacedEvent;
 import com.roti5dao.order.pricing.PricingContext;
 import com.roti5dao.order.pricing.PricingStep;
@@ -46,6 +47,11 @@ public final class PromotionHooks {
 
         @EventListener
         public void onCancelled(OrderCancelledEvent e) {
+            promotionService.releaseUsage(e.orderId());
+        }
+
+        @EventListener
+        public void onItemsChanging(OrderItemsChangingEvent e) {
             promotionService.releaseUsage(e.orderId());
         }
     }

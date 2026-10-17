@@ -23,6 +23,7 @@ import com.roti5dao.order.entity.OrderItemOption;
 import com.roti5dao.order.entity.OrderStatus;
 import com.roti5dao.order.event.OrderEvents.OrderCancelledEvent;
 import com.roti5dao.order.event.OrderEvents.OrderCompletedEvent;
+import com.roti5dao.order.event.OrderEvents.OrderItemsChangingEvent;
 import com.roti5dao.order.event.OrderEvents.OrderPlacedEvent;
 import com.roti5dao.order.pricing.PricingContext;
 import com.roti5dao.order.pricing.PricingContext.CartLine;
@@ -31,7 +32,9 @@ import com.roti5dao.order.pricing.PricingService;
 import com.roti5dao.order.repository.OrderRepository;
 import com.roti5dao.payment.service.PaymentService;
 import com.roti5dao.user.service.UserAccountService;
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
@@ -121,6 +124,12 @@ public class OrderService {
                 ? req.guestName().trim() : null;
         PricingContext ctx = price(req.items(), req.promoCode(), req.redeemPoints(), customerId, OrderChannel.WALK_IN);
         Order order = persist(ctx, OrderChannel.WALK_IN, customerId, guestName, null, req.note(), staffId);
+        if (Boolean.TRUE.equals(req.payLater())) {
+            // "ยังไม่ชำระ" — เข้าคิวครัวเลย เก็บเงินทีหลังผ่าน POST /admin/orders/{id}/payments
+            order.setPayLater(true);
+            statusMachine.transition(order, OrderStatus.CONFIRMED, time.now());
+            orderRepository.flush();
+        }
         return OrderMapper.full(order, List.of(), nickname(customerId));
     }
 
@@ -134,10 +143,48 @@ public class OrderService {
                     "ใช้ endpoint นี้เปลี่ยนเป็น PREPARING / READY / COMPLETED เท่านั้น");
         }
         Order order = lock(orderId);
+        if (target == OrderStatus.COMPLETED && order.isPayLater()) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "ออเดอร์นี้ยังชำระไม่ครบ — รับเงินก่อนปิดออเดอร์");
+        }
         statusMachine.transition(order, target, time.now());
         if (target == OrderStatus.COMPLETED) {
             events.publishEvent(new OrderCompletedEvent(order.getId(), order.getCustomerId(), order.getTotalAmount()));
         }
+        orderRepository.flush();
+        return OrderMapper.full(order, paymentService.forOrder(orderId), nickname(order.getCustomerId()));
+    }
+
+    /** "ยังไม่ชำระ" สำหรับออเดอร์ที่เปิดไว้แล้ว (หน้าร้านหรือออนไลน์มารับ) — payment PENDING ที่ค้างอยู่คงไว้ */
+    @Transactional
+    public OrderResponse markPayLater(Long orderId) {
+        Order order = lock(orderId);
+        if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "เปลี่ยนเป็นยังไม่ชำระได้เฉพาะออเดอร์ที่รอชำระ");
+        }
+        order.setPayLater(true);
+        statusMachine.transition(order, OrderStatus.CONFIRMED, time.now());
+        orderRepository.flush();
+        return OrderMapper.full(order, paymentService.forOrder(orderId), nickname(order.getCustomerId()));
+    }
+
+    /** ปิดออเดอร์หน้าเคาน์เตอร์ในครั้งเดียว — เดินทุกขั้นที่เหลือใน transaction เดียว (พังกลางทาง = rollback ทั้งหมด) */
+    @Transactional
+    public OrderResponse complete(Long orderId) {
+        Order order = lock(orderId);
+        if (order.isPayLater()) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "ออเดอร์นี้ยังชำระไม่ครบ — รับเงินก่อนปิดออเดอร์");
+        }
+        if (order.getStatus() == OrderStatus.PENDING_PAYMENT || order.getStatus() == OrderStatus.COMPLETED
+                || order.getStatus() == OrderStatus.CANCELLED) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "ปิดออเดอร์ได้เมื่อชำระแล้วและยังไม่เสร็จ/ยกเลิก");
+        }
+        var now = time.now();
+        for (OrderStatus next : List.of(OrderStatus.PREPARING, OrderStatus.READY, OrderStatus.COMPLETED)) {
+            if (statusMachine.canTransition(order.getStatus(), next)) {
+                statusMachine.transition(order, next, now);
+            }
+        }
+        events.publishEvent(new OrderCompletedEvent(order.getId(), order.getCustomerId(), order.getTotalAmount()));
         orderRepository.flush();
         return OrderMapper.full(order, paymentService.forOrder(orderId), nickname(order.getCustomerId()));
     }
@@ -148,6 +195,7 @@ public class OrderService {
         Order order = lock(orderId);
         statusMachine.transition(order, OrderStatus.CANCELLED, time.now());
         order.setCancelReason(reason.trim());
+        order.setPayLater(false);
         paymentService.voidForCancelledOrder(orderId, staffId);
         events.publishEvent(new OrderCancelledEvent(order.getId(), order.getCustomerId()));
         orderRepository.flush();
@@ -157,8 +205,11 @@ public class OrderService {
 
     /** ยืนยันออเดอร์เมื่อยอดที่ชำระแล้ว ≥ ยอดสุทธิ (เรียกจาก OrderPaymentService) */
     void confirmIfFullyPaid(Order order) {
-        if (order.getStatus() == OrderStatus.PENDING_PAYMENT
-                && paymentService.paidTotal(order.getId()).compareTo(order.getTotalAmount()) >= 0) {
+        if (paymentService.paidTotal(order.getId()).compareTo(order.getTotalAmount()) < 0) {
+            return;
+        }
+        order.setPayLater(false);
+        if (order.getStatus() == OrderStatus.PENDING_PAYMENT) {
             statusMachine.transition(order, OrderStatus.CONFIRMED, time.now());
         }
     }
@@ -169,6 +220,110 @@ public class OrderService {
 
     String nickname(Long customerId) {
         return customerId == null ? null : userAccountService.findNickname(customerId).orElse(null);
+    }
+
+    // ---------------------------------------------------------------- แก้รายการ (POS)
+
+    private static final java.util.Set<OrderStatus> EDITABLE =
+            java.util.EnumSet.of(OrderStatus.PENDING_PAYMENT, OrderStatus.CONFIRMED);
+
+    /** เพิ่มรายการ */
+    @Transactional
+    public OrderResponse addItem(Long orderId, CartItemRequest req) {
+        Order order = lockEditable(orderId);
+        List<CartItemRequest> cart = new ArrayList<>(currentCart(order, null));
+        cart.add(req);
+        return reprice(order, cart);
+    }
+
+    /** แก้รายการ (เปลี่ยนจำนวน / ตัวเลือก / หมายเหตุ / เมนู) */
+    @Transactional
+    public OrderResponse updateItem(Long orderId, Long itemId, CartItemRequest req) {
+        Order order = lockEditable(orderId);
+        requireItem(order, itemId);
+        List<CartItemRequest> cart = new ArrayList<>();
+        for (OrderItem i : order.getItems()) {
+            cart.add(i.getId().equals(itemId) ? req : toCart(i));
+        }
+        return reprice(order, cart);
+    }
+
+    /** ลบรายการ — ลบรายการสุดท้ายไม่ได้ (ให้ยกเลิกออเดอร์แทน) */
+    @Transactional
+    public OrderResponse removeItem(Long orderId, Long itemId) {
+        Order order = lockEditable(orderId);
+        requireItem(order, itemId);
+        List<CartItemRequest> cart = currentCart(order, itemId);
+        if (cart.isEmpty()) {
+            throw new BusinessException(ErrorCode.INVALID_OPERATION, "ลบรายการสุดท้ายไม่ได้ — ให้ยกเลิกออเดอร์แทน");
+        }
+        return reprice(order, cart);
+    }
+
+    private Order lockEditable(Long orderId) {
+        Order order = lock(orderId);
+        if (order.getChannel() != OrderChannel.WALK_IN) {
+            throw new BusinessException(ErrorCode.INVALID_OPERATION, "แก้รายการได้เฉพาะออเดอร์หน้าร้าน");
+        }
+        if (!EDITABLE.contains(order.getStatus())) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "แก้รายการได้ก่อนครัวเริ่มทำเท่านั้น");
+        }
+        if (order.getPointsRedeemed() > 0) {
+            throw new BusinessException(ErrorCode.INVALID_OPERATION, "ออเดอร์นี้ใช้แต้มแลกส่วนลด — ให้ยกเลิกแล้วเปิดบิลใหม่");
+        }
+        return order;
+    }
+
+    private static void requireItem(Order order, Long itemId) {
+        if (order.getItems().stream().noneMatch(i -> i.getId().equals(itemId))) {
+            throw new NotFoundException("รายการในออเดอร์");
+        }
+    }
+
+    private static List<CartItemRequest> currentCart(Order order, Long excludeItemId) {
+        return order.getItems().stream().filter(i -> !i.getId().equals(excludeItemId)).map(OrderService::toCart).toList();
+    }
+
+    /** ตัวเลือกที่ถูกลบไปแล้ว (option_item_id = null) จะหลุดออกตอนคำนวณใหม่ */
+    private static CartItemRequest toCart(OrderItem i) {
+        return new CartItemRequest(i.getProductId(), i.getQuantity(),
+                i.getOptions().stream().map(OrderItemOption::getOptionItemId).filter(java.util.Objects::nonNull).toList(),
+                i.getNote());
+    }
+
+    /**
+     * คำนวณใหม่ทั้งบิล (ราคาปัจจุบัน + โปร) แล้วแทนที่รายการเดิม — เลขออเดอร์/คิวคงเดิม
+     * ยอดใหม่ต่ำกว่าที่จ่ายไปแล้ว → ไม่ให้แก้ (ระบบยังไม่มีคืนเงินบางส่วน)
+     */
+    private OrderResponse reprice(Order order, List<CartItemRequest> cart) {
+        if (cart.size() > 50) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "รายการในออเดอร์ได้สูงสุด 50 รายการ");
+        }
+        events.publishEvent(new OrderItemsChangingEvent(order.getId())); // คืนโควต้าโปรเดิมก่อนคำนวณ
+        PricingContext ctx = price(cart, order.getPromoCode(), 0, order.getCustomerId(), order.getChannel());
+        BigDecimal paid = paymentService.paidTotal(order.getId());
+        if (ctx.total().compareTo(paid) < 0) {
+            throw new BusinessException(ErrorCode.PAYMENT_AMOUNT_MISMATCH,
+                    "ยอดใหม่ " + ctx.total() + " บาท ต่ำกว่าที่ชำระแล้ว " + paid + " บาท — ให้ยกเลิกออเดอร์แล้วเปิดใหม่");
+        }
+        order.setSubtotal(ctx.getSubtotal());
+        order.setPromotionDiscount(ctx.getPromotionDiscount());
+        order.setPointDiscount(ctx.getPointDiscount());
+        order.setTotalAmount(ctx.total());
+        order.getItems().clear();
+        orderRepository.flush();
+        fillItems(order, ctx);
+        orderRepository.flush();
+        events.publishEvent(new OrderPlacedEvent(order.getId(), order.getCustomerId(),
+                List.copyOf(ctx.getAppliedPromotions()), 0));
+
+        if (paid.compareTo(order.getTotalAmount()) >= 0) {
+            confirmIfFullyPaid(order);
+        } else if (order.getStatus() == OrderStatus.CONFIRMED) {
+            order.setPayLater(true); // อยู่ในคิวแล้วแต่ยอดเพิ่ม → ค้างเก็บส่วนต่าง
+        }
+        orderRepository.flush();
+        return OrderMapper.full(order, paymentService.forOrder(order.getId()), nickname(order.getCustomerId()));
     }
 
     // ---------------------------------------------------------------- internals
@@ -216,6 +371,23 @@ public class OrderService {
         order.setPointsRedeemed(ctx.getPointsRedeemed());
         order.setNote(note == null || note.isBlank() ? null : note.trim());
         order.setCashierId(cashierId);
+        order.setPromoCode(ctx.getPromoCode() == null || ctx.getPromoCode().isBlank() ? null : ctx.getPromoCode().trim());
+        fillItems(order, ctx);
+        orderRepository.saveAndFlush(order);
+
+        // Phase 4 listener: บันทึกการใช้โปร (กันโควต้าเกิน) + ตัดแต้มที่แลก — ล้มเหลว = rollback ทั้งออเดอร์
+        events.publishEvent(new OrderPlacedEvent(order.getId(), customerId, List.copyOf(ctx.getAppliedPromotions()),
+                ctx.getPointsRedeemed()));
+
+        // ยอด 0 บาท (ส่วนลดครบ) ไม่ต้องชำระ → ยืนยันทันที
+        if (order.getTotalAmount().signum() == 0) {
+            statusMachine.transition(order, OrderStatus.CONFIRMED, time.now());
+        }
+        orderRepository.flush();
+        return order;
+    }
+
+    private static void fillItems(Order order, PricingContext ctx) {
         for (PricedLine l : ctx.getLines()) {
             OrderItem item = new OrderItem();
             item.setProductId(l.getProductId());
@@ -236,17 +408,5 @@ public class OrderService {
             }
             order.addItem(item);
         }
-        orderRepository.saveAndFlush(order);
-
-        // Phase 4 listener: บันทึกการใช้โปร (กันโควต้าเกิน) + ตัดแต้มที่แลก — ล้มเหลว = rollback ทั้งออเดอร์
-        events.publishEvent(new OrderPlacedEvent(order.getId(), customerId, List.copyOf(ctx.getAppliedPromotions()),
-                ctx.getPointsRedeemed()));
-
-        // ยอด 0 บาท (ส่วนลดครบ) ไม่ต้องชำระ → ยืนยันทันที
-        if (order.getTotalAmount().signum() == 0) {
-            statusMachine.transition(order, OrderStatus.CONFIRMED, time.now());
-        }
-        orderRepository.flush();
-        return order;
     }
 }

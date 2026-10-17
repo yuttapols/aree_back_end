@@ -3,9 +3,6 @@ package com.roti5dao.payment.service;
 import com.roti5dao.common.exception.BusinessException;
 import com.roti5dao.common.exception.ErrorCode;
 import com.roti5dao.common.exception.NotFoundException;
-import com.roti5dao.common.storage.FileStorageService;
-import com.roti5dao.common.storage.FileStorageService.LoadedFile;
-import com.roti5dao.common.storage.StorageFolder;
 import com.roti5dao.common.util.MoneyUtils;
 import com.roti5dao.payment.entity.Payment;
 import com.roti5dao.payment.entity.PaymentMethod;
@@ -21,7 +18,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 
 /**
  * บันทึก/ตรวจการชำระเงิน — ไม่รู้จักออเดอร์ (module order เป็นผู้ตรวจสถานะออเดอร์และยอดคงค้างก่อนเรียก)
@@ -32,12 +28,10 @@ import org.springframework.web.multipart.MultipartFile;
 public class PaymentService {
 
     private final PaymentRepository repository;
-    private final FileStorageService storage;
     private final Clock clock;
 
-    public PaymentService(PaymentRepository repository, FileStorageService storage, Clock clock) {
+    public PaymentService(PaymentRepository repository, Clock clock) {
         this.repository = repository;
-        this.storage = storage;
         this.clock = clock;
     }
 
@@ -63,19 +57,12 @@ public class PaymentService {
         return repository.saveAndFlush(p);
     }
 
-    /** ลูกค้าแนบสลิปเอง → PENDING รอพนักงานตรวจ (สลิปเก็บเป็นไฟล์ private) */
-    public Payment recordSlip(Long orderId, PaymentMethod method, BigDecimal amount, String referenceNo, MultipartFile slip) {
-        if (method.isRequiresSlip() && (slip == null || slip.isEmpty())) {
-            throw new BusinessException(ErrorCode.SLIP_REQUIRED);
-        }
+    /** ลูกค้าเลือกช่องทางชำระเงินเอง (ไม่มีสลิป) → PENDING รอร้านตรวจยอดเข้าแล้วอนุมัติ */
+    public Payment recordOnline(Long orderId, PaymentMethod method, BigDecimal amount, String referenceNo) {
         if (method.isRequiresReference() && isBlank(referenceNo)) {
             throw new BusinessException(ErrorCode.REFERENCE_REQUIRED);
         }
-        Payment p = newPayment(orderId, method, MoneyUtils.scale(amount), referenceNo);
-        if (slip != null && !slip.isEmpty()) {
-            p.setSlipKey(storage.store(slip, StorageFolder.SLIPS).location());
-        }
-        return repository.saveAndFlush(p);
+        return repository.saveAndFlush(newPayment(orderId, method, MoneyUtils.scale(amount), referenceNo));
     }
 
     public Payment lockForUpdate(Long paymentId) {
@@ -144,14 +131,6 @@ public class PaymentService {
     @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
     public Payment get(Long id) {
         return repository.findById(id).orElseThrow(() -> new NotFoundException("รายการชำระเงิน"));
-    }
-
-    @Transactional(readOnly = true, propagation = Propagation.SUPPORTS)
-    public LoadedFile loadSlip(Payment p) {
-        if (p.getSlipKey() == null) {
-            throw new NotFoundException("สลิป");
-        }
-        return storage.loadPrivate(p.getSlipKey());
     }
 
     private static Payment newPayment(Long orderId, PaymentMethod method, BigDecimal amount, String referenceNo) {

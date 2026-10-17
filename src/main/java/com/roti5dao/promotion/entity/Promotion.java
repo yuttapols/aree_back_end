@@ -18,6 +18,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import org.hibernate.annotations.SQLRestriction;
 import lombok.Getter;
 import lombok.Setter;
 import org.hibernate.annotations.DynamicUpdate;
@@ -31,6 +32,7 @@ import org.hibernate.type.SqlTypes;
 @Getter
 @Setter
 @Entity
+@SQLRestriction("deleted_at IS NULL")
 @DynamicUpdate
 @Table(name = "promotion")
 public class Promotion extends AuditableEntity {
@@ -109,6 +111,10 @@ public class Promotion extends AuditableEntity {
 
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
+
+    /** ลบแล้ว (ต่างจาก active=false ที่แค่ปิดชั่วคราว) — ทุก query กรองออกด้วย @SQLRestriction */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
 
     @OneToMany(mappedBy = "promotion", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<PromotionTarget> targets = new ArrayList<>();

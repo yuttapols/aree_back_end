@@ -43,7 +43,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     ResponseEntity<ApiResponse<Void>> handleBusiness(BusinessException ex) {
-        return build(ex.getCode(), ex.getMessage(), List.of());
+        return build(ex.getCode(), ex.getMessage(),
+                ex.getField() == null ? List.of() : List.of(new FieldErrorItem(ex.getField(), ex.getMessage())));
     }
 
     @ExceptionHandler(PasswordPolicy.PolicyViolation.class)
@@ -76,7 +77,25 @@ public class GlobalExceptionHandler {
         return build(ErrorCode.VALIDATION_ERROR, ErrorCode.VALIDATION_ERROR.defaultMessage(), fields);
     }
 
-    @ExceptionHandler({HttpMessageNotReadableException.class, MissingServletRequestParameterException.class,
+    /** body อ่านไม่ได้ — ถ้ารู้ว่าพังที่ฟิลด์ไหน (ขาด/ชนิดผิด) บอกใน fields ให้ FE แก้ได้ทันที */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    ResponseEntity<ApiResponse<Void>> handleUnreadable(HttpMessageNotReadableException ex) {
+        if (ex.getCause() instanceof tools.jackson.databind.DatabindException de && !de.getPath().isEmpty()) {
+            StringBuilder path = new StringBuilder();
+            for (var ref : de.getPath()) {
+                if (ref.getPropertyName() != null) {
+                    path.append(path.isEmpty() ? "" : ".").append(ref.getPropertyName());
+                } else if (ref.getIndex() >= 0) {
+                    path.append('[').append(ref.getIndex()).append(']');
+                }
+            }
+            return build(ErrorCode.BAD_REQUEST, ErrorCode.BAD_REQUEST.defaultMessage(),
+                    List.of(new FieldErrorItem(path.toString(), "ต้องระบุค่า และชนิดข้อมูลต้องถูกต้อง")));
+        }
+        return build(ErrorCode.BAD_REQUEST, ErrorCode.BAD_REQUEST.defaultMessage(), List.of());
+    }
+
+    @ExceptionHandler({MissingServletRequestParameterException.class,
             MissingServletRequestPartException.class, MethodArgumentTypeMismatchException.class})
     ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception ex) {
         return build(ErrorCode.BAD_REQUEST, ErrorCode.BAD_REQUEST.defaultMessage(), List.of());

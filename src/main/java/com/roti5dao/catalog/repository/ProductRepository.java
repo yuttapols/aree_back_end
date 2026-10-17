@@ -47,7 +47,5 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             """)
     Page<Product> searchAdmin(Long categoryId, Boolean active, String pattern, Pageable pageable);
 
-    boolean existsByCode(String code);
-
-    boolean existsByCodeAndIdNot(String code, Long id);
+    boolean existsByCategoryId(Long categoryId);
 }

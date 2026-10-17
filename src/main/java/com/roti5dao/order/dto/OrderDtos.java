@@ -57,7 +57,9 @@ public final class OrderDtos {
                                      @Min(0) @Max(10_000_000) Integer redeemPoints,
                                      @Size(max = 20) String customerPhone,
                                      @Size(max = 100) String guestName,
-                                     @Size(max = 500) String note) {
+                                     @Size(max = 500) String note,
+                                     /** true = "ยังไม่ชำระ": เข้าคิวครัวทันที เก็บเงินทีหลัง */
+                                     Boolean payLater) {
     }
 
     /** amount ว่าง = ชำระยอดคงค้างทั้งหมด */
@@ -65,6 +67,12 @@ public final class OrderDtos {
                                       @DecimalMin("0.01") @DecimalMax("99999999.99") @Digits(integer = 8, fraction = 2) BigDecimal amount,
                                       @DecimalMin("0.00") @DecimalMax("99999999.99") @Digits(integer = 8, fraction = 2) BigDecimal cashReceived,
                                       @Size(max = 100) String referenceNo) {
+    }
+
+    /** ลูกค้าเลือกช่องทางชำระเงิน (ไม่มีสลิป) — amount ว่าง = ยอดคงค้างทั้งหมด */
+    public record OnlinePaymentRequest(@NotBlank @Size(max = 30) String methodCode,
+                                       @DecimalMin("0.01") @DecimalMax("99999999.99") @Digits(integer = 8, fraction = 2) BigDecimal amount,
+                                       @Size(max = 100) String referenceNo) {
     }
 
     public record VerifyPaymentRequest(@NotNull Boolean approve, @Size(max = 300) String rejectReason) {
@@ -78,10 +86,11 @@ public final class OrderDtos {
 
     // ---------- Responses ----------
 
-    public record LineOption(String groupName, String name, BigDecimal extraPrice) {
+    public record LineOption(Long optionItemId, String groupName, String name, BigDecimal extraPrice) {
     }
 
-    public record Line(Long productId, String productName, BigDecimal unitPrice, BigDecimal optionsPrice, int quantity,
+    /** id = id ของรายการในออเดอร์ (ใช้กับ PUT/DELETE /admin/orders/{id}/items/{itemId}) — quote เป็น null */
+    public record Line(Long id, Long productId, String productName, BigDecimal unitPrice, BigDecimal optionsPrice, int quantity,
                        int freeQuantity, BigDecimal lineTotal, String note, List<LineOption> options) {
     }
 
@@ -100,7 +109,8 @@ public final class OrderDtos {
                                 BigDecimal pointDiscount, BigDecimal totalAmount, BigDecimal paidAmount,
                                 BigDecimal remainingAmount, int pointsRedeemed, int pointsEarned, String note,
                                 Long cashierId, List<PaymentResponse> payments, Instant createdAt,
-                                Instant confirmedAt, Instant completedAt, Instant cancelledAt, String cancelReason) {
+                                Instant confirmedAt, Instant completedAt, Instant cancelledAt, String cancelReason,
+                                boolean payLater) {
     }
 
     /** มุมมองสาธารณะผ่าน tracking link — ปิดบังเบอร์โทร ไม่แสดงข้อมูลภายใน */
@@ -112,11 +122,13 @@ public final class OrderDtos {
     }
 
     public record OrderListItem(Long id, String orderNo, OrderChannel channel, OrderStatus status, int queueNo,
-                                String customerName, boolean member, BigDecimal totalAmount, Instant createdAt) {
+                                String customerName, boolean member, BigDecimal totalAmount,
+                                BigDecimal remainingAmount, Instant createdAt, boolean payLater) {
     }
 
     public record BoardItem(Long id, String orderNo, OrderChannel channel, OrderStatus status, int queueNo,
-                            String customerName, List<Line> items, String note, Instant createdAt, Instant confirmedAt) {
+                            String customerName, List<Line> items, String note, Instant createdAt, Instant confirmedAt,
+                            boolean payLater) {
     }
 
     public record ReceiptResponse(String shopName, String shopPhone, OrderResponse order, String cashierName,

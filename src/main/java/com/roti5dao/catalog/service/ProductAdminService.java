@@ -24,10 +24,12 @@ import com.roti5dao.common.storage.StorageFolder;
 import com.roti5dao.common.util.LikeUtils;
 import com.roti5dao.common.util.MoneyUtils;
 import com.roti5dao.common.web.PageResponse;
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
+import java.util.UUID;
 import java.util.Set;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -37,7 +39,6 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 public class ProductAdminService {
 
-    private static final int MAX_IMAGES = 10;
 
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
@@ -45,17 +46,20 @@ public class ProductAdminService {
     private final OptionGroupRepository optionGroupRepository;
     private final ProductOptionGroupRepository mapRepository;
     private final FileStorageService storage;
+    private final ImageUrlValidator imageUrlValidator;
     private final Clock clock;
 
     public ProductAdminService(ProductRepository productRepository, CategoryRepository categoryRepository,
                                ProductImageRepository imageRepository, OptionGroupRepository optionGroupRepository,
-                               ProductOptionGroupRepository mapRepository, FileStorageService storage, Clock clock) {
+                               ProductOptionGroupRepository mapRepository, FileStorageService storage,
+                               ImageUrlValidator imageUrlValidator, Clock clock) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
         this.imageRepository = imageRepository;
         this.optionGroupRepository = optionGroupRepository;
         this.mapRepository = mapRepository;
         this.storage = storage;
+        this.imageUrlValidator = imageUrlValidator;
         this.clock = clock;
     }
 
@@ -72,27 +76,31 @@ public class ProductAdminService {
 
     @Transactional
     public AdminProductResponse create(ProductUpsertRequest req) {
-        if (productRepository.existsByCode(req.code())) {
-            throw new BusinessException(ErrorCode.DUPLICATE_VALUE, "รหัสสินค้านี้ถูกใช้แล้ว");
-        }
         Product p = new Product();
         apply(p, req);
+        // ต้องได้ id ก่อนถึงจะ gen รหัสได้ — ใส่รหัสชั่วคราวที่ไม่ซ้ำแน่นอนไว้ก่อน แล้วแทนใน transaction เดียวกัน
+        p.setCode("TMP-" + UUID.randomUUID().toString().replace("-", "").substring(0, 26)); // code ยาวได้ 30
+        productRepository.saveAndFlush(p);
+        p.setCode(productCode(p.getCategory().getId(), p.getId()));
         return detail(productRepository.saveAndFlush(p));
+    }
+
+    /** รหัสเมนู = RT- + id ประเภท 3 หลัก + id เมนู 4 หลัก (เช่น RT-0010015) — gen ครั้งเดียวตอนสร้าง แก้ไม่ได้ */
+    static String productCode(Long categoryId, Long productId) {
+        return "RT-%03d%04d".formatted(categoryId, productId);
     }
 
     @Transactional
     public AdminProductResponse update(Long id, ProductUpsertRequest req) {
         Product p = product(id);
-        if (productRepository.existsByCodeAndIdNot(req.code(), id)) {
-            throw new BusinessException(ErrorCode.DUPLICATE_VALUE, "รหัสสินค้านี้ถูกใช้แล้ว");
-        }
         apply(p, req);
         return detail(productRepository.saveAndFlush(p));
     }
 
     @Transactional
     public void delete(Long id) {
-        product(id).setActive(false);
+        // ลบ ≠ ปิดใช้งาน — แถวยังอยู่เพราะออเดอร์/ยอดขายย้อนหลังอ้างถึง
+        product(id).setDeletedAt(Instant.now(clock));
     }
 
     /** พนักงานกด "ของหมด/มีของ" ได้ */
@@ -106,19 +114,19 @@ public class ProductAdminService {
     @Transactional
     public AdminProductResponse addImage(Long id, MultipartFile file) {
         Product p = product(id);
-        if (imageRepository.countByProductId(id) >= MAX_IMAGES) {
-            throw new BusinessException(ErrorCode.INVALID_OPERATION, "รูปสินค้าได้สูงสุด " + MAX_IMAGES + " รูป");
-        }
         var stored = storage.store(file, StorageFolder.PRODUCTS);
+        // เมนูละ 1 รูป — อัปใหม่ = แทนที่รูปเดิม (ลบรูปเก่าบน Cloudinary หลัง commit)
+        for (ProductImage old : imageRepository.findByProductIdOrderBySortOrderAscIdAsc(id)) {
+            imageRepository.delete(old);
+            storage.deletePublicLater(old.getUrl());
+        }
         ProductImage img = new ProductImage();
         img.setProductId(id);
         img.setUrl(stored.location());
-        img.setSortOrder((int) imageRepository.countByProductId(id));
+        img.setSortOrder(0);
         img.setCreatedAt(Instant.now(clock));
         imageRepository.save(img);
-        if (p.getImageUrl() == null) {
-            p.setImageUrl(stored.location());
-        }
+        p.setImageUrl(stored.location());
         return detail(p);
     }
 
@@ -132,6 +140,7 @@ public class ProductAdminService {
             p.setImageUrl(imageRepository.findByProductIdOrderBySortOrderAscIdAsc(id).stream()
                     .filter(i -> !i.getId().equals(imageId)).map(ProductImage::getUrl).findFirst().orElse(null));
         }
+        storage.deletePublicLater(img.getUrl());
         return detail(p);
     }
 
@@ -160,14 +169,26 @@ public class ProductAdminService {
         return detail(p);
     }
 
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
+    }
+
     private void apply(Product p, ProductUpsertRequest req) {
         Category c = categoryRepository.findById(req.categoryId()).orElseThrow(() -> new NotFoundException("หมวดหมู่"));
         p.setCategory(c);
-        p.setCode(req.code());
+        BigDecimal price = MoneyUtils.scale(req.price());
+        BigDecimal originalPrice = req.originalPrice() == null ? null : MoneyUtils.scale(req.originalPrice());
+        if (originalPrice != null && originalPrice.compareTo(price) <= 0) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "ราคาก่อนลดต้องมากกว่าราคาขาย", "originalPrice");
+        }
         p.setName(req.name().trim());
+        p.setNameEn(blankToNull(req.nameEn()));
         p.setDescription(req.description());
-        p.setPrice(MoneyUtils.scale(req.price()));
-        p.setImageUrl(ImageUrlValidator.requireStoredOrNull(req.imageUrl()));
+        p.setDescriptionEn(blankToNull(req.descriptionEn()));
+        p.setPrice(price);
+        p.setOriginalPrice(originalPrice);
+        p.setBadge(blankToNull(req.badge()));
+        p.setImageUrl(imageUrlValidator.requireStoredOrNull(req.imageUrl()));
         p.setAvailable(req.available());
         p.setRecommended(req.recommended());
         p.setActive(req.active());
@@ -189,7 +210,8 @@ public class ProductAdminService {
 
     private static AdminProductResponse toResponse(Product p, List<ProductImageResponse> images, List<OptionGroupResponse> groups) {
         return new AdminProductResponse(p.getId(), p.getCategory().getId(), p.getCategory().getName(), p.getCode(),
-                p.getName(), p.getDescription(), p.getPrice(), p.getImageUrl(), p.isAvailable(), p.isRecommended(),
+                p.getName(), p.getNameEn(), p.getDescription(), p.getDescriptionEn(), p.getPrice(), p.getOriginalPrice(),
+                p.getBadge(), p.getImageUrl(), p.isAvailable(), p.isRecommended(),
                 p.isActive(), p.getSortOrder(), p.getUpdatedAt(), images, groups);
     }
 }

@@ -56,4 +56,6 @@ public interface PromotionRepository extends JpaRepository<Promotion, Long> {
               and p.type = com.roti5dao.promotion.entity.PromotionEnums.PromotionType.POINT_MULTIPLIER
             """)
     List<java.math.BigDecimal> findMultipliersForOrder(Long orderId);
+
+    boolean existsByBannerUrl(String bannerUrl);
 }

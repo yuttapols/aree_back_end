@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import com.roti5dao.common.security.CurrentUser;
 import com.roti5dao.common.web.ApiResponse;
 import com.roti5dao.order.dto.OrderDtos.OnlineOrderRequest;
+import com.roti5dao.order.dto.OrderDtos.OnlinePaymentRequest;
 import com.roti5dao.order.dto.OrderDtos.OrderResponse;
 import com.roti5dao.order.dto.OrderDtos.QuoteRequest;
 import com.roti5dao.order.dto.OrderDtos.QuoteResponse;
@@ -14,22 +15,15 @@ import com.roti5dao.order.service.OrderPaymentService;
 import com.roti5dao.order.service.OrderQueryService;
 import com.roti5dao.order.service.OrderService;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.DecimalMax;
-import jakarta.validation.constraints.DecimalMin;
-import jakarta.validation.constraints.Size;
-import java.math.BigDecimal;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.multipart.MultipartFile;
 
 /** สั่งออนไลน์ได้ทั้ง guest และสมาชิก (ถ้าแนบ Bearer token จะผูกกับสมาชิกอัตโนมัติ) */
 @RestController
@@ -68,14 +62,12 @@ public class PublicOrderController {
         return ApiResponse.ok(queryService.track(trackingToken));
     }
 
-    @PostMapping(path = "/track/{trackingToken}/payments", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping("/track/{trackingToken}/payments")
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "🌐 แนบสลิป (multipart: methodCode, amount?, referenceNo?, slip) รอพนักงานตรวจ")
-    public ApiResponse<TrackResponse> submitSlip(@PathVariable UUID trackingToken,
-                                                 @RequestParam @Size(max = 30) String methodCode,
-                                                 @RequestParam(required = false) @DecimalMin("0.01") @DecimalMax("99999999.99") BigDecimal amount,
-                                                 @RequestParam(required = false) @Size(max = 100) String referenceNo,
-                                                 @RequestParam(value = "slip", required = false) MultipartFile slip) {
-        return ApiResponse.ok(orderPaymentService.submitSlip(trackingToken, methodCode, amount, referenceNo, slip));
+    @Operation(summary = "🌐 เลือกช่องทางชำระเงิน (ไม่มีสลิป) → PENDING รอร้านตรวจยอดเข้าเอง")
+    public ApiResponse<TrackResponse> submitPayment(@PathVariable UUID trackingToken,
+                                                    @Valid @RequestBody OnlinePaymentRequest req) {
+        return ApiResponse.ok(orderPaymentService.submitPayment(trackingToken, req.methodCode(), req.amount(),
+                req.referenceNo()));
     }
 }

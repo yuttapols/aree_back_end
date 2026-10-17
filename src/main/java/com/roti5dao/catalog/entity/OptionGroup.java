@@ -12,12 +12,15 @@ import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import java.util.ArrayList;
 import java.util.List;
+import org.hibernate.annotations.SQLRestriction;
+import java.time.Instant;
 import lombok.Getter;
 import lombok.Setter;
 
 @Getter
 @Setter
 @Entity
+@SQLRestriction("deleted_at IS NULL")
 @Table(name = "option_group")
 public class OptionGroup extends AuditableEntity {
 
@@ -34,8 +37,19 @@ public class OptionGroup extends AuditableEntity {
     @Column(name = "max_select", nullable = false)
     private int maxSelect = 1;
 
+    @Column(name = "name_en", length = 100)
+    private String nameEn;
+
+    /** ติ๊กไว้ให้ก่อน — ลูกค้าเอาออกได้ (FE แสดง "ไม่ใส่…") */
+    @Column(name = "default_selected", nullable = false)
+    private boolean defaultSelected;
+
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
+
+    /** ลบแล้ว (ต่างจาก active=false ที่แค่ปิดชั่วคราว) — ทุก query กรองออกด้วย @SQLRestriction */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
 
     @Column(name = "sort_order", nullable = false)
     private int sortOrder;

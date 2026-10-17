@@ -84,6 +84,14 @@ public class Order extends AuditableEntity {
     @Column(name = "confirmed_at")
     private Instant confirmedAt;
 
+    /** POS "ยังไม่ชำระ" — เข้าคิวครัวแล้วแต่ยังค้างเงิน (ชำระครบแล้วกลับเป็น false) */
+    @Column(name = "pay_later", nullable = false)
+    private boolean payLater;
+
+    /** โค้ดโปรที่ใส่ตอนสั่ง (null = ไม่ใส่) — ใช้คำนวณราคาใหม่ตอนแก้รายการ */
+    @Column(name = "promo_code", length = 30)
+    private String promoCode;
+
     @Column(name = "completed_at")
     private Instant completedAt;
 

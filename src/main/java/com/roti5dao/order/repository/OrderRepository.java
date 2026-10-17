@@ -50,6 +50,26 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             """)
     Page<Order> search(OrderStatus status, OrderChannel channel, Instant from, Instant to, Pageable pageable);
 
+    /** คิวหน้าร้านที่ยังไม่ปิด: รอชำระ หรือ "ยังไม่ชำระ" ที่ยังไม่เสร็จ/ยกเลิก — เรียงตามเลขคิว */
+    @Query(value = """
+            select o from Order o
+            where (o.status = com.roti5dao.order.entity.OrderStatus.PENDING_PAYMENT
+                   or (o.payLater = true and o.status not in (com.roti5dao.order.entity.OrderStatus.COMPLETED,
+                                                              com.roti5dao.order.entity.OrderStatus.CANCELLED)))
+              and (:channel is null or o.channel = :channel)
+              and o.createdAt >= :from and o.createdAt < :to
+            order by o.queueNo asc, o.id asc
+            """,
+            countQuery = """
+            select count(o) from Order o
+            where (o.status = com.roti5dao.order.entity.OrderStatus.PENDING_PAYMENT
+                   or (o.payLater = true and o.status not in (com.roti5dao.order.entity.OrderStatus.COMPLETED,
+                                                              com.roti5dao.order.entity.OrderStatus.CANCELLED)))
+              and (:channel is null or o.channel = :channel)
+              and o.createdAt >= :from and o.createdAt < :to
+            """)
+    Page<Order> searchQueue(OrderChannel channel, Instant from, Instant to, Pageable pageable);
+
     @Query("""
             select distinct o from Order o left join fetch o.items
             where o.status in :statuses and o.createdAt >= :from and o.createdAt < :to

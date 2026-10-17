@@ -101,7 +101,7 @@ class LoyaltyIT extends IntegrationTest {
     void memberEarnsPointsWhenOrderCompleted() {
         Session c = api.newCustomer();
         String staff = api.newStaff("STAFF").accessToken();
-        long beef = api.productId("MT-BEEF"); // 80
+        long beef = api.productId("มะตะบะเนื้อ"); // 80
 
         assertThat(quote(c.accessToken(), beef, 5, null, null).data().get("pointsToEarn").asInt()).isEqualTo(16);
         JsonNode order = completeWalkIn(staff, phoneOf(c), Map.of(), item(beef, 5)); // 400 บาท → 16 แต้ม
@@ -117,8 +117,8 @@ class LoyaltyIT extends IntegrationTest {
     @Test
     void redeemRulesAndCancelRestoresPoints() {
         Session c = api.newCustomer();
-        long beef = api.productId("MT-BEEF");
-        long milo = api.productId("DK-MILO"); // 35
+        long beef = api.productId("มะตะบะเนื้อ");
+        long milo = api.productId("ไมโลเย็น"); // 35
 
         assertThat(api.post("/api/v1/admin/customers/" + c.userId() + "/points/adjust", api.adminToken(),
                 Map.of("points", 300, "remark", "ของขวัญเปิดร้าน")).status()).isEqualTo(200);
@@ -180,7 +180,7 @@ class LoyaltyIT extends IntegrationTest {
         var p = promo("SAVE10", "PERCENT", 10);
         p.put("maxDiscount", 20);
         createPromo(p);
-        long beef = api.productId("MT-BEEF");
+        long beef = api.productId("มะตะบะเนื้อ");
 
         assertThat(quote(null, beef, 1, "save10", null).data().get("promotionDiscount").asDouble()).isEqualTo(8.0);
         assertThat(quote(null, beef, 5, "SAVE10", null).data().get("promotionDiscount").asDouble()).isEqualTo(20.0); // เพดาน
@@ -196,7 +196,7 @@ class LoyaltyIT extends IntegrationTest {
         p.put("memberOnly", true);
         p.put("minOrderAmount", 100);
         createPromo(p);
-        long beef = api.productId("MT-BEEF");
+        long beef = api.productId("มะตะบะเนื้อ");
         assertThat(quote(null, beef, 2, "MEMBER20", null).errorCode()).isEqualTo("PROMOTION_NOT_ELIGIBLE");
         Session c = api.newCustomer();
         assertThat(quote(c.accessToken(), beef, 1, "MEMBER20", null).errorCode()).isEqualTo("PROMOTION_NOT_ELIGIBLE"); // ยอดไม่ถึง
@@ -208,7 +208,7 @@ class LoyaltyIT extends IntegrationTest {
         var p = promo("LIMIT2", "FIXED_AMOUNT", 5);
         p.put("usageLimit", 2);
         long promoId = createPromo(p);
-        long milo = api.productId("DK-MILO");
+        long milo = api.productId("ไมโลเย็น");
 
         ExecutorService pool = Executors.newFixedThreadPool(6);
         int ok = 0;
@@ -248,7 +248,7 @@ class LoyaltyIT extends IntegrationTest {
         p.put("usagePerCustomer", 1);
         createPromo(p);
         Session c = api.newCustomer();
-        long milo = api.productId("DK-MILO");
+        long milo = api.productId("ไมโลเย็น");
         assertThat(api.post("/api/v1/public/orders", c.accessToken(),
                 Map.of("items", List.of(item(milo, 1)), "promoCode", "ONCE")).status()).isEqualTo(201);
         assertThat(api.post("/api/v1/public/orders", c.accessToken(),
@@ -273,7 +273,7 @@ class LoyaltyIT extends IntegrationTest {
         assertThat(q.data().get("promotionDiscount").asDouble()).isEqualTo(40.0);
         assertThat(q.data().get("items").get(0).get("freeQuantity").asInt()).isEqualTo(2);
         // สินค้าอื่นไม่เข้าเงื่อนไข
-        assertThat(quote(null, api.productId("DK-MILO"), 3, "B2G1", null).errorCode()).isEqualTo("PROMOTION_NOT_ELIGIBLE");
+        assertThat(quote(null, api.productId("ไมโลเย็น"), 3, "B2G1", null).errorCode()).isEqualTo("PROMOTION_NOT_ELIGIBLE");
     }
 
     @Test
@@ -296,7 +296,7 @@ class LoyaltyIT extends IntegrationTest {
             assertThat(q.data().get("promotionDiscount").asDouble()).isEqualTo(30.0);
             assertThat(q.data().get("appliedPromotions").get(0).get("promotionId").asLong()).isEqualTo(b);
             // โปร auto ไม่กระทบสินค้าอื่น
-            assertThat(quote(null, api.productId("DK-MILO"), 1, null, null).data().get("promotionDiscount").asDouble()).isZero();
+            assertThat(quote(null, api.productId("ไมโลเย็น"), 1, null, null).data().get("promotionDiscount").asDouble()).isZero();
         } finally {
             api.call(HttpMethod.DELETE, "/api/v1/admin/promotions/" + a, api.adminToken(), null);
             api.call(HttpMethod.DELETE, "/api/v1/admin/promotions/" + b, api.adminToken(), null);
@@ -310,7 +310,7 @@ class LoyaltyIT extends IntegrationTest {
         createPromo(p);
         Session c = api.newCustomer();
         String phone = phoneOf(c);
-        long beef = api.productId("MT-BEEF");
+        long beef = api.productId("มะตะบะเนื้อ");
 
         assertThat(quote(c.accessToken(), beef, 5, "WEDX2", null).data().get("pointsToEarn").asInt()).isEqualTo(32);
         assertThat(quote(null, beef, 5, "WEDX2", null).errorCode()).isEqualTo("PROMOTION_NOT_ELIGIBLE"); // guest

@@ -58,7 +58,7 @@ public class AdminOptionGroupController {
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "👑 ปิดกลุ่มตัวเลือก")
+    @Operation(summary = "👑 ลบกลุ่มตัวเลือก (ถอดออกจากทุกสินค้า) — ปิดชั่วคราวใช้ active=false ใน PUT")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ApiResponse.ok();

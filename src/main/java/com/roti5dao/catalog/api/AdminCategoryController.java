@@ -55,7 +55,7 @@ public class AdminCategoryController {
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "👑 ปิดหมวด (soft delete)")
+    @Operation(summary = "👑 ลบหมวด (ต้องไม่มีสินค้าเหลือ) — ปิดชั่วคราวใช้ active=false ใน PUT")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ApiResponse.ok();

@@ -9,6 +9,7 @@ import com.roti5dao.common.web.PageResponse;
 import com.roti5dao.order.dto.OrderDtos.AdminQuoteRequest;
 import com.roti5dao.order.dto.OrderDtos.BoardItem;
 import com.roti5dao.order.dto.OrderDtos.CancelRequest;
+import com.roti5dao.order.dto.OrderDtos.CartItemRequest;
 import com.roti5dao.order.dto.OrderDtos.OrderListItem;
 import com.roti5dao.order.dto.OrderDtos.OrderResponse;
 import com.roti5dao.order.dto.OrderDtos.QuoteResponse;
@@ -26,10 +27,12 @@ import java.time.LocalDate;
 import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -67,13 +70,14 @@ public class AdminOrderController {
     }
 
     @GetMapping
-    @Operation(summary = "🧑‍🍳 รายการออเดอร์ (กรอง status / channel / date)")
+    @Operation(summary = "🧑‍🍳 รายการออเดอร์ (กรอง status / channel / date) — queue=true = คิวที่ยังไม่ปิด เรียงตามเลขคิว")
     public ApiResponse<PageResponse<OrderListItem>> search(@RequestParam(required = false) OrderStatus status,
+                                                           @RequestParam(defaultValue = "false") boolean queue,
                                                            @RequestParam(required = false) OrderChannel channel,
                                                            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
                                                            @RequestParam(required = false) Integer page,
                                                            @RequestParam(required = false) Integer size) {
-        return ApiResponse.ok(queryService.search(status, channel, date,
+        return ApiResponse.ok(queryService.search(status, channel, date, queue,
                 PageQuery.of(page, size, PageQuery.NEWEST_FIRST)));
     }
 
@@ -94,6 +98,38 @@ public class AdminOrderController {
     @Operation(summary = "🧑‍🍳 รับเงิน (CASH คำนวณเงินทอน, จ่ายผสมได้) — amount ว่าง = ยอดคงค้าง")
     public ApiResponse<OrderResponse> pay(@PathVariable Long id, @Valid @RequestBody StaffPaymentRequest req) {
         return ApiResponse.ok(orderPaymentService.payByStaff(id, req, CurrentUser.requireId()));
+    }
+
+    @PostMapping("/{id}/items")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "🧑‍🍳 เพิ่มรายการในออเดอร์หน้าร้าน (ก่อนครัวเริ่มทำ) — คำนวณราคาใหม่ทั้งบิล")
+    public ApiResponse<OrderResponse> addItem(@PathVariable Long id, @Valid @RequestBody CartItemRequest req) {
+        return ApiResponse.ok(orderService.addItem(id, req));
+    }
+
+    @PutMapping("/{id}/items/{itemId}")
+    @Operation(summary = "🧑‍🍳 แก้รายการ (จำนวน/ตัวเลือก/หมายเหตุ/เมนู) — คำนวณราคาใหม่ทั้งบิล")
+    public ApiResponse<OrderResponse> updateItem(@PathVariable Long id, @PathVariable Long itemId,
+                                                 @Valid @RequestBody CartItemRequest req) {
+        return ApiResponse.ok(orderService.updateItem(id, itemId, req));
+    }
+
+    @DeleteMapping("/{id}/items/{itemId}")
+    @Operation(summary = "🧑‍🍳 ลบรายการ (ลบรายการสุดท้ายไม่ได้ — ให้ยกเลิกออเดอร์)")
+    public ApiResponse<OrderResponse> removeItem(@PathVariable Long id, @PathVariable Long itemId) {
+        return ApiResponse.ok(orderService.removeItem(id, itemId));
+    }
+
+    @PostMapping("/{id}/pay-later")
+    @Operation(summary = "🧑‍🍳 เปลี่ยนเป็น \"ยังไม่ชำระ\" — PENDING_PAYMENT → CONFIRMED (เข้าคิวครัว) เก็บเงินทีหลัง")
+    public ApiResponse<OrderResponse> payLater(@PathVariable Long id) {
+        return ApiResponse.ok(orderService.markPayLater(id));
+    }
+
+    @PostMapping("/{id}/complete")
+    @Operation(summary = "🧑‍🍳 ปิดออเดอร์ทีเดียว — CONFIRMED/PREPARING/READY → COMPLETED (ต้องชำระครบ)")
+    public ApiResponse<OrderResponse> complete(@PathVariable Long id) {
+        return ApiResponse.ok(orderService.complete(id));
     }
 
     @PatchMapping("/{id}/status")

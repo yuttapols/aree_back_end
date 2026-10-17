@@ -59,7 +59,9 @@ public class ProfileService {
     public ProfileResponse updateAvatar(Long userId, MultipartFile file) {
         CustomerProfile p = profile(userId);
         var stored = storage.store(file, StorageFolder.AVATARS);
+        String old = p.getAvatarUrl();
         p.setAvatarUrl(stored.location());
+        storage.deletePublicLater(old);
         return ProfileResponse.of(p.getUser(), p);
     }
 

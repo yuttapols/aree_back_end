@@ -19,6 +19,7 @@ public record AppProperties(
         @Valid @NotNull Cors cors,
         @Valid @NotNull Security security,
         @Valid @NotNull Storage storage,
+        Cloudinary cloudinary,
         @Valid @NotNull Bootstrap bootstrap,
         @Valid @NotNull OrderLimits order) {
 
@@ -81,9 +82,21 @@ public record AppProperties(
     public record Storage(@NotBlank String localDir, @NotBlank String publicUrlPrefix, @NotNull DataSize maxFileSize) {
     }
 
+    /** ตั้งครบทั้ง 3 ค่า → เก็บรูปบน Cloudinary · ไม่ตั้ง → เก็บบนดิสก์ (local-dir) */
+    public record Cloudinary(String cloudName, String apiKey, String apiSecret, String folder) {
+        public Cloudinary {
+            folder = folder == null || folder.isBlank() ? "roti5dao" : folder.trim();
+        }
+
+        public boolean enabled() {
+            return cloudName != null && !cloudName.isBlank() && apiKey != null && !apiKey.isBlank()
+                    && apiSecret != null && !apiSecret.isBlank();
+        }
+    }
+
     public record Bootstrap(String adminPhone, String adminPassword, String adminNickname) {
     }
 
-    public record OrderLimits(@Min(1) int maxItemsPerOrder, @Min(1) int maxQuantityPerItem, @Min(1) int maxPendingSlipsPerOrder) {
+    public record OrderLimits(@Min(1) int maxItemsPerOrder, @Min(1) int maxQuantityPerItem, @Min(1) int maxPendingPaymentsPerOrder) {
     }
 }

@@ -8,10 +8,10 @@ INSERT INTO category (name, slug, icon, sort_order, created_by) VALUES
     ('โรตีคาว',      'savory-roti',  'pi pi-bolt',   2, 'seed'),
     ('มะตะบะ',       'mataba',       'pi pi-box',    3, 'seed'),
     ('เครื่องดื่ม',   'drinks',       'pi pi-filter', 4, 'seed')
-ON CONFLICT (slug) DO NOTHING;
+ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING;
 
 INSERT INTO product (category_id, code, name, description, price, is_recommended, sort_order, created_by)
-SELECT c.id, v.code, v.name, v.description, v.price, v.recommended, v.sort_order, 'seed'
+SELECT c.id, 'TMP-' || v.code, v.name, v.description, v.price, v.recommended, v.sort_order, 'seed'
 FROM (VALUES
     ('sweet-roti',  'RT-CLASSIC',  'โรตีนมข้นน้ำตาล', 'โรตีกรอบ ราดนมข้นหวาน โรยน้ำตาล', 30.00, TRUE,  1),
     ('sweet-roti',  'RT-BANANA',   'โรตีกล้วยหอม',     'กล้วยหอมสด ห่อแป้งกรอบ',          45.00, TRUE,  2),
@@ -24,7 +24,11 @@ FROM (VALUES
     ('drinks',      'DK-MILO',     'ไมโลเย็น',         '',                                  35.00, FALSE, 2)
 ) AS v(slug, code, name, description, price, recommended, sort_order)
 JOIN category c ON c.slug = v.slug
-ON CONFLICT (code) DO NOTHING;
+WHERE NOT EXISTS (SELECT 1 FROM product p WHERE p.category_id = c.id AND p.name = v.name AND p.deleted_at IS NULL);
+
+-- รหัสเมนูรูปแบบเดียวกับที่ระบบ gen (RT- + id ประเภท 3 หลัก + id เมนู 4 หลัก)
+UPDATE product SET code = 'RT-' || lpad(category_id::text, 3, '0') || lpad(id::text, 4, '0')
+WHERE code LIKE 'TMP-%';
 
 -- ตัวเลือก: ท็อปปิ้ง
 INSERT INTO option_group (name, min_select, max_select, sort_order, created_by)

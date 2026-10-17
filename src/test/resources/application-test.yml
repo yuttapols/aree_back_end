@@ -15,6 +15,9 @@ app:
       enabled: false
   storage:
     local-dir: target/test-storage
+  cloudinary:
+    # test เก็บบนดิสก์เสมอ — ไม่อัปขึ้น Cloudinary จริงแม้ .env จะตั้งค่าไว้
+    cloud-name: ""
   scheduling:
     enabled: false
   bootstrap:

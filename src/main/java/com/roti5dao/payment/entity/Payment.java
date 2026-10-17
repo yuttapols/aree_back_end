@@ -46,10 +46,6 @@ public class Payment extends AuditableEntity {
     @Column(name = "reference_no", length = 100)
     private String referenceNo;
 
-    /** storage key ของไฟล์ private (ไม่ใช่ URL สาธารณะ) */
-    @Column(name = "slip_url", length = 500)
-    private String slipKey;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private PaymentStatus status = PaymentStatus.PENDING;

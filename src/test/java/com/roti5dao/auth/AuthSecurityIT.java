@@ -273,7 +273,7 @@ class AuthSecurityIT extends IntegrationTest {
     void customerCanOnlySeeOwnOrders() {
         var a = api.newCustomer();
         var b = api.newCustomer();
-        long productId = api.productId("RT-CLASSIC");
+        long productId = api.productId("โรตีนมข้นน้ำตาล");
         Res order = api.post("/api/v1/public/orders", a.accessToken(),
                 Map.of("items", java.util.List.of(Map.of("productId", productId, "quantity", 1))));
         assertThat(order.status()).isEqualTo(201);

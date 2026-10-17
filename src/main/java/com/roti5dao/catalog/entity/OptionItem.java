@@ -30,6 +30,9 @@ public class OptionItem {
     @Column(nullable = false, length = 100)
     private String name;
 
+    @Column(name = "name_en", length = 100)
+    private String nameEn;
+
     @Column(name = "extra_price", nullable = false, precision = 10, scale = 2)
     private BigDecimal extraPrice = BigDecimal.ZERO;
 

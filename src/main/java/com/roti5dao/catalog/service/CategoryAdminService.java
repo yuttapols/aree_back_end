@@ -5,9 +5,12 @@ import com.roti5dao.catalog.dto.CatalogDtos.CategoryUpsertRequest;
 import com.roti5dao.catalog.dto.CatalogDtos.SortItem;
 import com.roti5dao.catalog.entity.Category;
 import com.roti5dao.catalog.repository.CategoryRepository;
+import com.roti5dao.catalog.repository.ProductRepository;
 import com.roti5dao.common.exception.BusinessException;
 import com.roti5dao.common.exception.ErrorCode;
 import com.roti5dao.common.exception.NotFoundException;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -19,9 +22,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class CategoryAdminService {
 
     private final CategoryRepository repository;
+    private final ProductRepository productRepository;
+    private final Clock clock;
 
-    public CategoryAdminService(CategoryRepository repository) {
+    public CategoryAdminService(CategoryRepository repository, ProductRepository productRepository, Clock clock) {
         this.repository = repository;
+        this.productRepository = productRepository;
+        this.clock = clock;
     }
 
     @Transactional(readOnly = true)
@@ -52,7 +59,11 @@ public class CategoryAdminService {
     /** soft delete — ออเดอร์เก่ายังอ้างอิงสินค้าในหมวดนี้ได้ */
     @Transactional
     public void delete(Long id) {
-        get(id).setActive(false);
+        Category c = get(id);
+        if (productRepository.existsByCategoryId(id)) {
+            throw new BusinessException(ErrorCode.INVALID_OPERATION, "หมวดนี้ยังมีสินค้า — ย้ายหรือลบสินค้าในหมวดนี้ก่อน");
+        }
+        c.setDeletedAt(Instant.now(clock));
     }
 
     @Transactional

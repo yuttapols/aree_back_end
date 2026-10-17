@@ -76,7 +76,7 @@ public class AdminProductController {
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    @Operation(summary = "👑 ปิดสินค้า (soft delete)")
+    @Operation(summary = "👑 ลบสินค้า — ปิดชั่วคราวใช้ active=false ใน PUT")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ApiResponse.ok();
@@ -90,7 +90,7 @@ public class AdminProductController {
 
     @PostMapping(path = "/{id}/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('ADMIN')")
-    @Operation(summary = "👑 อัปโหลดรูปสินค้า (สูงสุด 10 รูป)")
+    @Operation(summary = "👑 อัปโหลดรูปสินค้า (เมนูละ 1 รูป — อัปใหม่จะแทนที่รูปเดิม)")
     public ApiResponse<AdminProductResponse> addImage(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
         return ApiResponse.ok(service.addImage(id, file));
     }

@@ -38,7 +38,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             new Rule("refresh", PATHS.matcher(HttpMethod.POST, "/api/v1/auth/refresh"), 30),
             new Rule("order-create", PATHS.matcher(HttpMethod.POST, "/api/v1/public/orders"), 10),
             new Rule("order-quote", PATHS.matcher(HttpMethod.POST, "/api/v1/public/orders/quote"), 60),
-            new Rule("slip", PATHS.matcher(HttpMethod.POST, "/api/v1/public/orders/track/*/payments"), 10),
+            new Rule("payment", PATHS.matcher(HttpMethod.POST, "/api/v1/public/orders/track/*/payments"), 10),
             new Rule("track", PATHS.matcher(HttpMethod.GET, "/api/v1/public/orders/track/**"), 60),
             new Rule("promo-validate", PATHS.matcher(HttpMethod.POST, "/api/v1/public/promotions/validate"), 30),
             new Rule("password", PATHS.matcher(HttpMethod.PUT, "/api/v1/me/password"), 5));

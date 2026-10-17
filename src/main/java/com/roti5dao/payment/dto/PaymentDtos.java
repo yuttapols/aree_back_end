@@ -16,25 +16,24 @@ public final class PaymentDtos {
     private PaymentDtos() {
     }
 
-    public record PaymentMethodResponse(Long id, String code, String name, boolean requiresSlip,
+    public record PaymentMethodResponse(Long id, String code, String name,
                                         boolean requiresReference, boolean allowOnline, String instruction, String icon,
                                         boolean active, int sortOrder) {
         public static PaymentMethodResponse of(PaymentMethod m) {
-            return new PaymentMethodResponse(m.getId(), m.getCode(), m.getName(), m.isRequiresSlip(),
+            return new PaymentMethodResponse(m.getId(), m.getCode(), m.getName(),
                     m.isRequiresReference(), m.isAllowOnline(), m.getInstruction(), m.getIcon(), m.isActive(),
                     m.getSortOrder());
         }
     }
 
     /** ข้อมูลที่ลูกค้าเห็น — PromptPay ID / บัญชีโอน มาจาก system_setting */
-    public record PublicPaymentMethod(String code, String name, boolean requiresSlip, boolean requiresReference,
+    public record PublicPaymentMethod(String code, String name, boolean requiresReference,
                                       String instruction, String icon, String promptPayId, String bankAccount) {
     }
 
     public record PaymentMethodUpsertRequest(
             @NotBlank @Size(max = 30) @Pattern(regexp = "^[A-Z][A-Z0-9_]*$", message = "ใช้ได้เฉพาะ A-Z 0-9 _") String code,
             @NotBlank @Size(max = 100) String name,
-            boolean requiresSlip,
             boolean requiresReference,
             boolean allowOnline,
             @Size(max = 1000) String instruction,
@@ -44,12 +43,12 @@ public final class PaymentDtos {
     }
 
     public record PaymentResponse(Long id, Long orderId, String methodCode, String methodName, BigDecimal amount,
-                                  BigDecimal cashReceived, BigDecimal changeAmount, String referenceNo, boolean hasSlip,
+                                  BigDecimal cashReceived, BigDecimal changeAmount, String referenceNo,
                                   PaymentStatus status, Instant paidAt, Long verifiedBy, String rejectReason,
                                   Instant createdAt) {
         public static PaymentResponse of(Payment p) {
             return new PaymentResponse(p.getId(), p.getOrderId(), p.getMethod().getCode(), p.getMethod().getName(),
-                    p.getAmount(), p.getCashReceived(), p.getChangeAmount(), p.getReferenceNo(), p.getSlipKey() != null,
+                    p.getAmount(), p.getCashReceived(), p.getChangeAmount(), p.getReferenceNo(),
                     p.getStatus(), p.getPaidAt(), p.getVerifiedBy(), p.getRejectReason(), p.getCreatedAt());
         }
     }

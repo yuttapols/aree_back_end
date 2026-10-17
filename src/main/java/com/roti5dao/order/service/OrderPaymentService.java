@@ -22,7 +22,6 @@ import java.math.BigDecimal;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.multipart.MultipartFile;
 
 /**
  * การชำระเงินของออเดอร์ — lock ออเดอร์ (SELECT FOR UPDATE) ทุกครั้ง
@@ -52,7 +51,12 @@ public class OrderPaymentService {
     @Transactional
     public OrderResponse payByStaff(Long orderId, StaffPaymentRequest req, Long staffId) {
         Order order = orderService.lock(orderId);
-        requirePendingPayment(order);
+        // ออเดอร์ "ยังไม่ชำระ" รับเงินได้ระหว่างอยู่ในคิวครัว (CONFIRMED/PREPARING/READY)
+        boolean inKitchen = order.getStatus() == OrderStatus.CONFIRMED || order.getStatus() == OrderStatus.PREPARING
+                || order.getStatus() == OrderStatus.READY;
+        if (!(order.isPayLater() && inKitchen)) {
+            requirePendingPayment(order);
+        }
         PaymentMethod method = paymentMethodService.requireUsable(req.methodCode(), false);
         BigDecimal amount = resolveAmount(order, req.amount());
         paymentService.recordByStaff(order.getId(), method, amount, req.cashReceived(), req.referenceNo(), staffId);
@@ -61,24 +65,23 @@ public class OrderPaymentService {
         return OrderMapper.full(order, paymentService.forOrder(orderId), orderService.nickname(order.getCustomerId()));
     }
 
-    /** ลูกค้าแนบสลิปผ่านลิงก์ติดตาม → PENDING รอพนักงานตรวจ */
+    /** ลูกค้าเลือกช่องทางชำระเงินผ่านลิงก์ติดตาม (ไม่มีสลิป) → PENDING รอร้านตรวจยอดเข้าเอง */
     @Transactional
-    public TrackResponse submitSlip(UUID trackingToken, String methodCode, BigDecimal amount, String referenceNo,
-                                    MultipartFile slip) {
+    public TrackResponse submitPayment(UUID trackingToken, String methodCode, BigDecimal amount, String referenceNo) {
         Order order = orderRepository.findByTrackingTokenForUpdate(trackingToken)
                 .orElseThrow(() -> new NotFoundException("ออเดอร์"));
         requirePendingPayment(order);
         PaymentMethod method = paymentMethodService.requireUsable(methodCode, true);
-        if (paymentService.pendingCount(order.getId()) >= limits.maxPendingSlipsPerOrder()) {
+        if (paymentService.pendingCount(order.getId()) >= limits.maxPendingPaymentsPerOrder()) {
             throw new BusinessException(ErrorCode.TOO_MANY_PENDING_PAYMENTS);
         }
         BigDecimal value = resolveAmount(order, amount);
-        paymentService.recordSlip(order.getId(), method, value, referenceNo, slip);
+        paymentService.recordOnline(order.getId(), method, value, referenceNo);
         Order full = orderRepository.findWithItems(order.getId()).orElseThrow();
         return OrderMapper.track(full, paymentService.forOrder(order.getId()));
     }
 
-    /** พนักงานตรวจสลิป — อนุมัติแล้วยอดครบ → CONFIRMED */
+    /** พนักงานตรวจยอดเข้า — อนุมัติแล้วยอดครบ → CONFIRMED */
     @Transactional
     public PaymentResponse verify(Long paymentId, boolean approve, String rejectReason, Long staffId) {
         // lock ออเดอร์ก่อน payment เสมอ (ลำดับเดียวกับ cancel) กัน deadlock
@@ -92,7 +95,7 @@ public class OrderPaymentService {
             BigDecimal remaining = remaining(order);
             if (payment.getAmount().compareTo(remaining) > 0) {
                 throw new BusinessException(ErrorCode.PAYMENT_AMOUNT_MISMATCH,
-                        "ยอดในสลิปเกินยอดคงค้าง (" + remaining + " บาท) กรุณาปฏิเสธและให้ลูกค้าแนบใหม่");
+                        "ยอดที่แจ้งเกินยอดคงค้าง (" + remaining + " บาท) กรุณาปฏิเสธแล้วให้ลูกค้าแจ้งใหม่");
             }
             paymentService.approve(payment, staffId);
             orderService.confirmIfFullyPaid(order);

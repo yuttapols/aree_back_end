@@ -1,6 +1,16 @@
 server:
-  # อยู่หลัง reverse proxy (nginx) — เชื่อ X-Forwarded-* เฉพาะจาก proxy ที่ตั้งค่าไว้
+  # อยู่หลัง proxy ของ Render — เชื่อ X-Forwarded-* (proto/IP จริงของลูกค้า สำหรับ rate limit + cookie Secure)
   forward-headers-strategy: native
+
+spring:
+  datasource:
+    hikari:
+      # Neon free จะหลับเองเมื่อไม่มีการใช้งาน — ห้ามให้ pool ไป ping/ค้าง connection ไว้ ไม่งั้น DB ไม่ได้หลับและกินโควต้า compute
+      minimum-idle: 0
+      idle-timeout: 60000          # ปิด connection ที่ว่างเกิน 1 นาที
+      keepalive-time: 0            # ไม่ ping connection ที่ว่าง
+      max-lifetime: 240000         # < 5 นาที (Neon ตัด connection ตอนหลับ)
+      connection-timeout: 15000    # เผื่อเวลาปลุก Neon (ปกติ < 3 วิ)
 
 springdoc:
   api-docs:

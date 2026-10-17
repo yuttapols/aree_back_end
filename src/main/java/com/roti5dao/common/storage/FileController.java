@@ -1,7 +1,5 @@
 package com.roti5dao.common.storage;
 
-import com.roti5dao.common.exception.BusinessException;
-import com.roti5dao.common.exception.ErrorCode;
 import com.roti5dao.common.exception.NotFoundException;
 import com.roti5dao.common.web.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -39,9 +37,6 @@ public class FileController {
     @Operation(summary = "👑 อัปโหลดรูป (JPG/PNG/WEBP) → ได้ url ไปใส่ imageUrl/bannerUrl")
     public ApiResponse<UploadResponse> upload(@RequestParam("file") MultipartFile file,
                                               @RequestParam(defaultValue = "PRODUCTS") StorageFolder folder) {
-        if (!folder.isPublic()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "ไม่สามารถอัปโหลดไปโฟลเดอร์นี้ได้");
-        }
         return ApiResponse.ok(new UploadResponse(storage.store(file, folder).location()));
     }
 

@@ -34,25 +34,30 @@ public final class CatalogDtos {
         }
     }
 
-    public record ProductSummary(Long id, Long categoryId, String code, String name, String description,
-                                 BigDecimal price, String imageUrl, boolean available, boolean recommended,
-                                 boolean hasOptions) {
+    public record ProductSummary(Long id, Long categoryId, String code, String name, String nameEn, String description,
+                                 String descriptionEn, BigDecimal price, BigDecimal originalPrice, String badge,
+                                 String imageUrl, boolean available, boolean recommended, boolean hasOptions) {
         public static ProductSummary of(Product p, boolean hasOptions) {
-            return new ProductSummary(p.getId(), p.getCategory().getId(), p.getCode(), p.getName(), p.getDescription(),
-                    p.getPrice(), p.getImageUrl(), p.isAvailable(), p.isRecommended(), hasOptions);
+            return new ProductSummary(p.getId(), p.getCategory().getId(), p.getCode(), p.getName(), p.getNameEn(),
+                    p.getDescription(), p.getDescriptionEn(), p.getPrice(), p.getOriginalPrice(), p.getBadge(),
+                    p.getImageUrl(), p.isAvailable(), p.isRecommended(), hasOptions);
         }
     }
 
-    public record OptionItemResponse(Long id, String name, BigDecimal extraPrice, boolean available, int sortOrder) {
+    public record OptionItemResponse(Long id, String name, String nameEn, BigDecimal extraPrice, boolean available,
+                                     int sortOrder) {
         public static OptionItemResponse of(OptionItem i) {
-            return new OptionItemResponse(i.getId(), i.getName(), i.getExtraPrice(), i.isAvailable(), i.getSortOrder());
+            return new OptionItemResponse(i.getId(), i.getName(), i.getNameEn(), i.getExtraPrice(), i.isAvailable(),
+                    i.getSortOrder());
         }
     }
 
-    public record OptionGroupResponse(Long id, String name, int minSelect, int maxSelect, boolean active, int sortOrder,
+    public record OptionGroupResponse(Long id, String name, String nameEn, int minSelect, int maxSelect,
+                                      boolean defaultSelected, boolean active, int sortOrder,
                                       List<OptionItemResponse> items) {
         public static OptionGroupResponse of(OptionGroup g) {
-            return new OptionGroupResponse(g.getId(), g.getName(), g.getMinSelect(), g.getMaxSelect(), g.isActive(),
+            return new OptionGroupResponse(g.getId(), g.getName(), g.getNameEn(), g.getMinSelect(), g.getMaxSelect(),
+                    g.isDefaultSelected(), g.isActive(),
                     g.getSortOrder(), g.getItems().stream().map(OptionItemResponse::of).toList());
         }
     }
@@ -63,8 +68,9 @@ public final class CatalogDtos {
         }
     }
 
-    public record ProductDetail(Long id, Long categoryId, String categoryName, String code, String name,
-                                String description, BigDecimal price, String imageUrl, boolean available,
+    public record ProductDetail(Long id, Long categoryId, String categoryName, String code, String name, String nameEn,
+                                String description, String descriptionEn, BigDecimal price, BigDecimal originalPrice,
+                                String badge, String imageUrl, boolean available,
                                 boolean recommended, List<ProductImageResponse> images,
                                 List<OptionGroupResponse> optionGroups) {
     }
@@ -73,7 +79,8 @@ public final class CatalogDtos {
     }
 
     public record AdminProductResponse(Long id, Long categoryId, String categoryName, String code, String name,
-                                       String description, BigDecimal price, String imageUrl, boolean available,
+                                       String nameEn, String description, String descriptionEn, BigDecimal price,
+                                       BigDecimal originalPrice, String badge, String imageUrl, boolean available,
                                        boolean recommended, boolean active, int sortOrder, Instant updatedAt,
                                        List<ProductImageResponse> images, List<OptionGroupResponse> optionGroups) {
     }
@@ -94,10 +101,14 @@ public final class CatalogDtos {
 
     public record ProductUpsertRequest(
             @NotNull Long categoryId,
-            @NotBlank @Size(max = 30) @Pattern(regexp = "^[A-Z0-9][A-Z0-9_-]*$", message = "ใช้ได้เฉพาะ A-Z 0-9 _ -") String code,
             @NotBlank @Size(max = 150) String name,
+            @Size(max = 150) String nameEn,
             @Size(max = 1000) String description,
+            @Size(max = 1000) String descriptionEn,
             @NotNull @DecimalMin("0.00") @DecimalMax("99999.99") @Digits(integer = 5, fraction = 2) BigDecimal price,
+            /** ราคาก่อนลด (ขีดฆ่า) — ถ้าส่งต้อง > price */
+            @DecimalMin("0.01") @DecimalMax("99999.99") @Digits(integer = 5, fraction = 2) BigDecimal originalPrice,
+            @Pattern(regexp = "^(bestseller|new|recommended)$", message = "badge ต้องเป็น bestseller, new หรือ recommended") String badge,
             @Size(max = 500) String imageUrl,
             boolean available,
             boolean recommended,
@@ -111,6 +122,7 @@ public final class CatalogDtos {
     public record OptionItemUpsert(
             Long id,
             @NotBlank @Size(max = 100) String name,
+            @Size(max = 100) String nameEn,
             @NotNull @DecimalMin("0.00") @DecimalMax("99999.99") @Digits(integer = 5, fraction = 2) BigDecimal extraPrice,
             boolean available,
             @Min(0) @Max(100000) int sortOrder) {
@@ -118,8 +130,11 @@ public final class CatalogDtos {
 
     public record OptionGroupUpsertRequest(
             @NotBlank @Size(max = 100) String name,
+            @Size(max = 100) String nameEn,
             @Min(0) @Max(50) int minSelect,
             @Min(1) @Max(50) int maxSelect,
+            /** ติ๊กไว้ให้ก่อน (ไม่ส่ง = false) */
+            Boolean defaultSelected,
             boolean active,
             @Min(0) @Max(100000) int sortOrder,
             @NotNull @Size(max = 50) List<@Valid OptionItemUpsert> items) {

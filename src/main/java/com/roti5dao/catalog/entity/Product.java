@@ -11,12 +11,15 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import org.hibernate.annotations.SQLRestriction;
+import java.time.Instant;
 import lombok.Getter;
 import lombok.Setter;
 
 @Getter
 @Setter
 @Entity
+@SQLRestriction("deleted_at IS NULL")
 @Table(name = "product")
 public class Product extends AuditableEntity {
 
@@ -49,8 +52,26 @@ public class Product extends AuditableEntity {
     @Column(name = "is_recommended", nullable = false)
     private boolean recommended;
 
+    @Column(name = "name_en", length = 150)
+    private String nameEn;
+
+    @Column(name = "description_en", length = 1000)
+    private String descriptionEn;
+
+    /** ราคาก่อนลด (แสดงขีดฆ่า) — null = ไม่มี, ถ้ามีต้อง > price */
+    @Column(name = "original_price", precision = 7, scale = 2)
+    private BigDecimal originalPrice;
+
+    /** bestseller | new | recommended — null = ไม่มีป้าย */
+    @Column(length = 20)
+    private String badge;
+
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
+
+    /** ลบแล้ว (ต่างจาก active=false ที่แค่ปิดชั่วคราว) — ทุก query กรองออกด้วย @SQLRestriction */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
 
     @Column(name = "sort_order", nullable = false)
     private int sortOrder;

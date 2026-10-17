@@ -52,11 +52,104 @@ class CatalogAdminIT extends IntegrationTest {
                 Map.of("available", false)).status()).isEqualTo(200);
         assertThat(publicProduct(id).get("available").asBoolean()).isFalse();
 
-        // soft delete → หายจาก public แต่ยังอยู่ในหลังบ้าน
+        // ลบ ≠ ปิดใช้งาน → หายทั้ง public และหลังบ้าน และนำรหัสกลับมาใช้ใหม่ได้
         assertThat(api.call(org.springframework.http.HttpMethod.DELETE, "/api/v1/admin/products/" + id,
                 api.adminToken(), null).status()).isEqualTo(200);
         assertThat(api.get("/api/v1/public/products/" + id, null).status()).isEqualTo(404);
-        assertThat(api.get("/api/v1/admin/products/" + id, api.adminToken()).data().get("active").asBoolean()).isFalse();
+        assertThat(api.get("/api/v1/admin/products/" + id, api.adminToken()).status()).isEqualTo(404);
+        assertThat(api.post("/api/v1/admin/products", api.adminToken(), product(cat, "TST-A1", 50)).status()).isEqualTo(201);
+    }
+
+    @Test
+    void productStorefrontFieldsSavedAndReturned() {
+        long cat = createCategory("test-cat-i18n");
+        var body = product(cat, "X", 15);
+        body.put("nameEn", "Plain roti");
+        body.put("descriptionEn", "");
+        body.put("originalPrice", 20.00);
+        body.put("badge", "new");
+        Res created = api.post("/api/v1/admin/products", api.adminToken(), body);
+        assertThat(created.status()).isEqualTo(201);
+        long id = created.data().get("id").asLong();
+        assertThat(created.data().get("nameEn").asString()).isEqualTo("Plain roti");
+        assertThat(created.data().get("descriptionEn").isNull()).isTrue(); // "" → null
+        assertThat(created.data().get("originalPrice").asDouble()).isEqualTo(20.0);
+
+        JsonNode pub = publicProduct(id);
+        assertThat(pub.get("badge").asString()).isEqualTo("new");
+        assertThat(pub.get("originalPrice").asDouble()).isEqualTo(20.0);
+        assertThat(pub.get("nameEn").asString()).isEqualTo("Plain roti");
+
+        // originalPrice ต้อง > price, badge ต้องอยู่ในรายการ
+        body.put("originalPrice", 15.00);
+        Res badPrice = api.put("/api/v1/admin/products/" + id, api.adminToken(), body);
+        assertThat(badPrice.errorCode()).isEqualTo("VALIDATION_ERROR");
+        assertThat(badPrice.body().get("error").get("fields").get(0).get("field").asString()).isEqualTo("originalPrice");
+        body.put("originalPrice", null);
+        body.put("badge", "hot");
+        Res badBadge = api.put("/api/v1/admin/products/" + id, api.adminToken(), body);
+        assertThat(badBadge.errorCode()).isEqualTo("VALIDATION_ERROR");
+        assertThat(badBadge.body().get("error").get("fields").get(0).get("field").asString()).isEqualTo("badge");
+
+        // ลบป้าย/ราคาขีดฆ่าได้ด้วยการส่ง null
+        body.put("badge", null);
+        Res cleared = api.put("/api/v1/admin/products/" + id, api.adminToken(), body);
+        assertThat(cleared.data().get("badge").isNull()).isTrue();
+        assertThat(cleared.data().get("originalPrice").isNull()).isTrue();
+    }
+
+    @Test
+    void missingRequiredNumberReportsFieldName() {
+        // ไม่ส่ง sortOrder (int) → 400 พร้อมบอกชื่อฟิลด์
+        Res r = api.post("/api/v1/admin/option-groups", api.adminToken(),
+                Map.of("name", "x", "minSelect", 0, "maxSelect", 1, "active", true, "items", List.of()));
+        assertThat(r.errorCode()).isEqualTo("BAD_REQUEST");
+        assertThat(r.body().get("error").get("fields").get(0).get("field").asString()).isEqualTo("sortOrder");
+    }
+
+    @Test
+    void productCodeGeneratedFromIdsAndImmutable() {
+        long cat = createCategory("test-cat-code");
+        Res created = api.post("/api/v1/admin/products", api.adminToken(), product(cat, "IGNORED", 25));
+        long id = created.data().get("id").asLong();
+        String expected = "RT-%03d%04d".formatted(cat, id);
+        assertThat(created.data().get("code").asString()).isEqualTo(expected).hasSize(10);
+
+        // ส่ง code มาตอนแก้ก็ไม่เปลี่ยน
+        var edit = product(cat, "RT-HACK", 30);
+        assertThat(api.put("/api/v1/admin/products/" + id, api.adminToken(), edit).data().get("code").asString())
+                .isEqualTo(expected);
+    }
+
+    @Test
+    void categoryDeleteIsSeparateFromDeactivate() {
+        long cat = createCategory("test-cat-del");
+        long pid = api.post("/api/v1/admin/products", api.adminToken(), product(cat, "TST-DEL1", 30)).data().get("id").asLong();
+
+        // ยังมีสินค้า → ลบไม่ได้
+        assertThat(api.call(org.springframework.http.HttpMethod.DELETE, "/api/v1/admin/categories/" + cat,
+                api.adminToken(), null).errorCode()).isEqualTo("INVALID_OPERATION");
+
+        // ปิดใช้งาน → ยังเห็นในหลังบ้าน
+        assertThat(api.put("/api/v1/admin/categories/" + cat, api.adminToken(),
+                Map.of("name", "หมวด test-cat-del", "slug", "test-cat-del", "sortOrder", 9, "active", false)).status())
+                .isEqualTo(200);
+        assertThat(categoryIds()).contains(cat);
+
+        // ลบสินค้าก่อน แล้วลบหมวดได้ → หายจากหลังบ้าน, slug ใช้ใหม่ได้
+        api.call(org.springframework.http.HttpMethod.DELETE, "/api/v1/admin/products/" + pid, api.adminToken(), null);
+        assertThat(api.call(org.springframework.http.HttpMethod.DELETE, "/api/v1/admin/categories/" + cat,
+                api.adminToken(), null).status()).isEqualTo(200);
+        assertThat(categoryIds()).doesNotContain(cat);
+        createCategory("test-cat-del");
+    }
+
+    private List<Long> categoryIds() {
+        List<Long> ids = new java.util.ArrayList<>();
+        for (JsonNode c : api.get("/api/v1/admin/categories", api.adminToken()).data()) {
+            ids.add(c.get("id").asLong());
+        }
+        return ids;
     }
 
     @Test
@@ -66,8 +159,6 @@ class CatalogAdminIT extends IntegrationTest {
                 Map.of("name", "x", "slug", "test-dup", "sortOrder", 1, "active", true));
         assertThat(dupSlug.errorCode()).isEqualTo("DUPLICATE_VALUE");
 
-        Res dupCode = api.post("/api/v1/admin/products", api.adminToken(), product(1, "RT-CLASSIC", 10));
-        assertThat(dupCode.errorCode()).isEqualTo("DUPLICATE_VALUE");
 
         Res badSlug = api.post("/api/v1/admin/categories", api.adminToken(),
                 Map.of("name", "x", "slug", "../../etc", "sortOrder", 1, "active", true));
@@ -79,10 +170,11 @@ class CatalogAdminIT extends IntegrationTest {
         long cat = createCategory("test-opt");
         long productId = api.post("/api/v1/admin/products", api.adminToken(), product(cat, "TST-OPT", 40)).data().get("id").asLong();
         Res group = api.post("/api/v1/admin/option-groups", api.adminToken(), Map.of("name", "ความหวาน",
-                "minSelect", 1, "maxSelect", 1, "active", true, "sortOrder", 1,
+                "minSelect", 1, "maxSelect", 1, "defaultSelected", true, "active", true, "sortOrder", 1,
                 "items", List.of(Map.of("name", "หวานน้อย", "extraPrice", 0, "available", true, "sortOrder", 1),
                         Map.of("name", "หวานมาก", "extraPrice", 5, "available", true, "sortOrder", 2))));
         assertThat(group.status()).isEqualTo(201);
+        assertThat(group.data().get("defaultSelected").asBoolean()).isTrue();
         long groupId = group.data().get("id").asLong();
 
         assertThat(api.put("/api/v1/admin/products/" + productId + "/option-groups", api.adminToken(),
@@ -113,7 +205,7 @@ class CatalogAdminIT extends IntegrationTest {
         assertThat(svg.errorCode()).isEqualTo("FILE_INVALID");
         // ลูกค้าอัปโหลดผ่าน /files ไม่ได้
         assertThat(upload("/api/v1/files", api.newCustomer().accessToken(), "a.png", "image/png", PNG).status()).isEqualTo(403);
-        // เลือกโฟลเดอร์ private ไม่ได้
+        // โฟลเดอร์ที่ไม่มี (SLIPS ถูกเอาออกแล้ว) → 400
         assertThat(upload("/api/v1/files?folder=SLIPS", api.adminToken(), "a.png", "image/png", PNG).status()).isEqualTo(400);
     }
 

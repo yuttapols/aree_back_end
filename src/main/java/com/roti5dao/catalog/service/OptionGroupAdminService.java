@@ -6,10 +6,13 @@ import com.roti5dao.catalog.dto.CatalogDtos.OptionItemUpsert;
 import com.roti5dao.catalog.entity.OptionGroup;
 import com.roti5dao.catalog.entity.OptionItem;
 import com.roti5dao.catalog.repository.OptionGroupRepository;
+import com.roti5dao.catalog.repository.ProductOptionGroupRepository;
 import com.roti5dao.common.exception.BusinessException;
 import com.roti5dao.common.exception.ErrorCode;
 import com.roti5dao.common.exception.NotFoundException;
 import com.roti5dao.common.util.MoneyUtils;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -23,9 +26,14 @@ import org.springframework.transaction.annotation.Transactional;
 public class OptionGroupAdminService {
 
     private final OptionGroupRepository repository;
+    private final ProductOptionGroupRepository mapRepository;
+    private final Clock clock;
 
-    public OptionGroupAdminService(OptionGroupRepository repository) {
+    public OptionGroupAdminService(OptionGroupRepository repository, ProductOptionGroupRepository mapRepository,
+                                   Clock clock) {
         this.repository = repository;
+        this.mapRepository = mapRepository;
+        this.clock = clock;
     }
 
     @Transactional(readOnly = true)
@@ -52,10 +60,12 @@ public class OptionGroupAdminService {
         return OptionGroupResponse.of(repository.saveAndFlush(g));
     }
 
-    /** soft delete — ปิดใช้งานกลุ่ม (สินค้าที่ผูกไว้จะไม่แสดงกลุ่มนี้) */
+    /** ลบกลุ่ม (ต่างจากปิดใช้งาน) — ถอดออกจากทุกสินค้าที่ผูกไว้ด้วย */
     @Transactional
     public void delete(Long id) {
-        group(id).setActive(false);
+        OptionGroup g = group(id);
+        mapRepository.deleteByOptionGroupId(id);
+        g.setDeletedAt(Instant.now(clock));
     }
 
     private OptionGroup group(Long id) {
@@ -68,8 +78,10 @@ public class OptionGroupAdminService {
             throw new BusinessException(ErrorCode.VALIDATION_ERROR, "maxSelect ต้องไม่น้อยกว่า minSelect");
         }
         g.setName(req.name().trim());
+        g.setNameEn(req.nameEn() == null || req.nameEn().isBlank() ? null : req.nameEn().trim());
         g.setMinSelect(req.minSelect());
         g.setMaxSelect(req.maxSelect());
+        g.setDefaultSelected(Boolean.TRUE.equals(req.defaultSelected()));
         g.setActive(req.active());
         g.setSortOrder(req.sortOrder());
 
@@ -91,6 +103,7 @@ public class OptionGroupAdminService {
                 g.getItems().add(item);
             }
             item.setName(u.name().trim());
+            item.setNameEn(u.nameEn() == null || u.nameEn().isBlank() ? null : u.nameEn().trim());
             item.setExtraPrice(MoneyUtils.scale(u.extraPrice()));
             item.setAvailable(u.available());
             item.setSortOrder(u.sortOrder());

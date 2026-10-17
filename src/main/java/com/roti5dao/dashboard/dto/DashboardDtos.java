@@ -15,7 +15,8 @@ public final class DashboardDtos {
 
     public record Summary(LocalDate from, LocalDate to, long orderCount, BigDecimal grossSales, BigDecimal totalDiscount,
                           BigDecimal netSales, BigDecimal averagePerOrder, long memberOrderCount, long walkInCount,
-                          long onlineCount, long cancelledCount, long newMembers, long pointsIssued, long pointsRedeemed) {
+                          long onlineCount, long cancelledCount, long newMembers, long pointsIssued, long pointsRedeemed,
+                          BigDecimal walkInAmount, BigDecimal onlineAmount, BigDecimal memberAmount, BigDecimal guestAmount) {
     }
 
     public record TrendPoint(LocalDate period, long orderCount, BigDecimal netSales) {

@@ -29,11 +29,14 @@ public class PromotionAdminService {
 
     private final PromotionRepository repository;
     private final PromotionUsageRepository usageRepository;
+    private final ImageUrlValidator imageUrlValidator;
     private final Clock clock;
 
-    public PromotionAdminService(PromotionRepository repository, PromotionUsageRepository usageRepository, Clock clock) {
+    public PromotionAdminService(PromotionRepository repository, PromotionUsageRepository usageRepository,
+                                 ImageUrlValidator imageUrlValidator, Clock clock) {
         this.repository = repository;
         this.usageRepository = usageRepository;
+        this.imageUrlValidator = imageUrlValidator;
         this.clock = clock;
     }
 
@@ -79,10 +82,10 @@ public class PromotionAdminService {
         return AdminPromotion.of(repository.saveAndFlush(p));
     }
 
-    /** soft delete */
+    /** ลบ (ต่างจากปิดใช้งาน) — แถวยังอยู่เพราะประวัติการใช้โปรอ้างถึง */
     @Transactional
     public void delete(Long id) {
-        promotion(id).setActive(false);
+        promotion(id).setDeletedAt(Instant.now(clock));
     }
 
     @Transactional(readOnly = true)
@@ -124,7 +127,7 @@ public class PromotionAdminService {
         p.setCode(code);
         p.setName(req.name().trim());
         p.setDescription(req.description());
-        p.setBannerUrl(ImageUrlValidator.requireStoredOrNull(req.bannerUrl()));
+        p.setBannerUrl(imageUrlValidator.requireStoredOrNull(req.bannerUrl()));
         p.setType(req.type());
         p.setDiscountValue(value);
         p.setMaxDiscount(req.type() == com.roti5dao.promotion.entity.PromotionEnums.PromotionType.PERCENT ? req.maxDiscount() : null);

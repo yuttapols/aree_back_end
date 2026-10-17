@@ -32,7 +32,7 @@ public class PaymentMethodService {
         String bank = blankToNull(settings.getString(SettingKey.PAYMENT_BANK_ACCOUNT));
         return repository.findByActiveTrueOrderBySortOrderAscIdAsc().stream()
                 .filter(m -> !onlineOnly || m.isAllowOnline())
-                .map(m -> new PublicPaymentMethod(m.getCode(), m.getName(), m.isRequiresSlip(), m.isRequiresReference(),
+                .map(m -> new PublicPaymentMethod(m.getCode(), m.getName(), m.isRequiresReference(),
                         m.getInstruction(), m.getIcon(),
                         "PROMPTPAY".equals(m.getCode()) ? promptPay : null,
                         "TRANSFER".equals(m.getCode()) ? bank : null))
@@ -78,11 +78,10 @@ public class PaymentMethodService {
     }
 
     private static void apply(PaymentMethod m, PaymentMethodUpsertRequest req) {
-        if (m.isCash() && (req.requiresSlip() || req.allowOnline())) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "เงินสดต้องไม่บังคับสลิปและใช้ออนไลน์ไม่ได้");
+        if (m.isCash() && req.allowOnline()) {
+            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "เงินสดใช้ออนไลน์ไม่ได้");
         }
         m.setName(req.name().trim());
-        m.setRequiresSlip(req.requiresSlip());
         m.setRequiresReference(req.requiresReference());
         m.setAllowOnline(req.allowOnline());
         m.setInstruction(req.instruction());

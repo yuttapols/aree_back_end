@@ -8,7 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
 /**
- * สร้าง response สำหรับส่งไฟล์รูปให้ browser แสดงผล (inline) — ใช้ร่วมกันระหว่างรูปสาธารณะและสลิป
+ * สร้าง response สำหรับส่งไฟล์รูปให้ browser แสดงผล (inline)
  * (header X-Content-Type-Options: nosniff ถูกใส่ให้ทุก response โดย SecurityConfig อยู่แล้ว)
  */
 public final class FileResponses {

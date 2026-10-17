@@ -34,9 +34,8 @@ public enum ErrorCode {
     ORDER_INVALID_STATUS(HttpStatus.UNPROCESSABLE_CONTENT, "สถานะออเดอร์ไม่อนุญาตให้ทำรายการนี้"),
     PAYMENT_AMOUNT_MISMATCH(HttpStatus.UNPROCESSABLE_CONTENT, "ยอดชำระไม่ถูกต้อง"),
     PAYMENT_METHOD_UNAVAILABLE(HttpStatus.UNPROCESSABLE_CONTENT, "ช่องทางชำระเงินนี้ไม่พร้อมใช้งาน"),
-    SLIP_REQUIRED(HttpStatus.UNPROCESSABLE_CONTENT, "กรุณาแนบสลิป"),
     REFERENCE_REQUIRED(HttpStatus.UNPROCESSABLE_CONTENT, "กรุณาระบุเลขอ้างอิง"),
-    TOO_MANY_PENDING_PAYMENTS(HttpStatus.UNPROCESSABLE_CONTENT, "มีสลิปรอตรวจสอบอยู่แล้ว กรุณารอพนักงานตรวจสอบ"),
+    TOO_MANY_PENDING_PAYMENTS(HttpStatus.UNPROCESSABLE_CONTENT, "มีรายการชำระเงินรอตรวจสอบอยู่แล้ว กรุณารอร้านตรวจสอบ"),
 
     // Phase 4 — point / promotion
     POINT_INSUFFICIENT(HttpStatus.UNPROCESSABLE_CONTENT, "แต้มไม่พอ"),

@@ -70,11 +70,25 @@ public class DashboardService {
                 .query((rs, n) -> new long[]{rs.getLong(1), rs.getLong(2)})
                 .single();
 
+        // ยอดเงิน (net) แยกช่องทาง / สมาชิก — นับ COMPLETED ตาม completed_at เหมือน v_daily_sales
+        BigDecimal[] split = jdbc.sql("""
+                        SELECT coalesce(sum(total_amount) FILTER (WHERE channel = 'WALK_IN'), 0),
+                               coalesce(sum(total_amount) FILTER (WHERE channel = 'ONLINE'), 0),
+                               coalesce(sum(total_amount) FILTER (WHERE customer_id IS NOT NULL), 0),
+                               coalesce(sum(total_amount) FILTER (WHERE customer_id IS NULL), 0)
+                        FROM orders WHERE status = 'COMPLETED' AND completed_at >= :s AND completed_at < :e
+                        """)
+                .param("s", start).param("e", end)
+                .query((rs, n) -> new BigDecimal[]{MoneyUtils.scale(rs.getBigDecimal(1)), MoneyUtils.scale(rs.getBigDecimal(2)),
+                        MoneyUtils.scale(rs.getBigDecimal(3)), MoneyUtils.scale(rs.getBigDecimal(4))})
+                .single();
+
         long orderCount = (long) sales[0];
         BigDecimal net = MoneyUtils.scale((BigDecimal) sales[3]);
         BigDecimal avg = orderCount == 0 ? MoneyUtils.ZERO : net.divide(BigDecimal.valueOf(orderCount), 2, RoundingMode.HALF_UP);
         return new Summary(from, to, orderCount, MoneyUtils.scale((BigDecimal) sales[1]), MoneyUtils.scale((BigDecimal) sales[2]),
-                net, avg, (long) sales[4], (long) sales[5], (long) sales[6], cancelled, newMembers, points[0], points[1]);
+                net, avg, (long) sales[4], (long) sales[5], (long) sales[6], cancelled, newMembers, points[0], points[1],
+                split[0], split[1], split[2], split[3]);
     }
 
     public List<TrendPoint> salesTrend(LocalDate from, LocalDate to, GroupBy groupBy) {

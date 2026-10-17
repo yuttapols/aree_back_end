@@ -98,7 +98,7 @@ public class PromotionController {
 
     @DeleteMapping("/admin/promotions/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    @Operation(summary = "👑 ปิดโปรโมชั่น (soft delete)")
+    @Operation(summary = "👑 ลบโปรโมชั่น — ปิดชั่วคราวใช้ active=false ใน PUT")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return ApiResponse.ok();

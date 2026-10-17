@@ -163,15 +163,15 @@ public class TestApi {
 
     // ------------------------------------------------------------------ catalog helpers
 
-    /** id ของสินค้าจาก seed ตาม code */
-    public long productId(String code) {
+    /** id ของสินค้าจาก seed ตามชื่อ (รหัสเมนูระบบ gen จาก id จึงคาดเดาไม่ได้) */
+    public long productId(String name) {
         Res r = get("/api/v1/public/products?keyword=", null);
         for (JsonNode p : r.data()) {
-            if (code.equals(p.get("code").asString())) {
+            if (name.equals(p.get("name").asString())) {
                 return p.get("id").asLong();
             }
         }
-        throw new IllegalStateException("product not found: " + code);
+        throw new IllegalStateException("product not found: " + name);
     }
 
     public JsonMapper json() {

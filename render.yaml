@@ -1,0 +1,38 @@
+# Render Blueprint — Dashboard > New > Blueprint > เลือก repo นี้
+# ค่าที่ sync: false ต้องกรอกเองใน Dashboard (เป็นความลับ ห้าม commit)
+services:
+  - type: web
+    name: roti5dao-backend
+    runtime: docker
+    plan: starter              # $7 — 512MB RAM, ไม่ sleep
+    region: singapore          # ให้ตรงกับ region ของ Neon (aws-ap-southeast-1)
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health
+    autoDeploy: true
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: DB_POOL_SIZE
+        value: "5"
+      - key: DB_URL               # jdbc:postgresql://<neon-host>/<db>?sslmode=require  (ใช้ host แบบ direct ไม่ใช่ -pooler)
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: JWT_SECRET           # openssl rand -base64 48
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS # URL หน้าร้านจริง เช่น https://roti5dao.vercel.app (คั่นด้วย comma)
+        sync: false
+      - key: REFRESH_COOKIE_SAME_SITE  # Strict ถ้า FE proxy /api มาที่ Render · None ถ้าเรียกข้ามโดเมนตรงๆ
+        value: Strict
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: ROTI_ADMIN_PHONE     # เบอร์เจ้าของร้าน — ใช้สร้าง ADMIN คนแรกครั้งเดียว
+        sync: false
+      - key: ROTI_ADMIN_PASSWORD  # รหัสชั่วคราว (บังคับเปลี่ยนตอน login ครั้งแรก) — ลบออกได้หลังสร้างแล้ว
+        sync: false

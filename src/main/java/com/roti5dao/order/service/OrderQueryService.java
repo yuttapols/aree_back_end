@@ -3,7 +3,6 @@ package com.roti5dao.order.service;
 import com.roti5dao.common.exception.NotFoundException;
 import com.roti5dao.common.setting.SettingKey;
 import com.roti5dao.common.setting.SystemSettingService;
-import com.roti5dao.common.storage.FileStorageService.LoadedFile;
 import com.roti5dao.common.time.BusinessTime;
 import com.roti5dao.common.web.PageResponse;
 import com.roti5dao.order.dto.OrderDtos.BoardItem;
@@ -21,6 +20,7 @@ import com.roti5dao.payment.entity.Payment;
 import com.roti5dao.payment.entity.PaymentStatus;
 import com.roti5dao.payment.service.PaymentService;
 import com.roti5dao.user.service.UserAccountService;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
@@ -34,6 +34,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,7 +73,8 @@ public class OrderQueryService {
     public PageResponse<OrderListItem> myOrders(Long customerId, Pageable pageable) {
         Page<Order> page = orderRepository.findByCustomerId(customerId, pageable);
         String nickname = userAccountService.findNickname(customerId).orElse(null);
-        return PageResponse.of(page, o -> OrderMapper.listItem(o, nickname));
+        Map<Long, BigDecimal> paid = paidTotals(page.getContent());
+        return PageResponse.of(page, o -> OrderMapper.listItem(o, nickname, paid.getOrDefault(o.getId(), BigDecimal.ZERO)));
     }
 
     /** เฉพาะออเดอร์ของตัวเอง — ของคนอื่นตอบ 404 (ไม่บอกว่ามีอยู่จริง) */
@@ -82,12 +84,27 @@ public class OrderQueryService {
         return full(o);
     }
 
-    public PageResponse<OrderListItem> search(OrderStatus status, OrderChannel channel, LocalDate date, Pageable pageable) {
+    /** queue = true → คิวที่ยังไม่ปิด (ไม่สน status, เรียงตามเลขคิว) */
+    public PageResponse<OrderListItem> search(OrderStatus status, OrderChannel channel, LocalDate date, boolean queue,
+                                              Pageable pageable) {
         Instant from = date == null ? MIN : time.startOfDay(date);
         Instant to = date == null ? MAX : time.endOfDay(date);
-        Page<Order> page = orderRepository.search(status, channel, from, to, pageable);
+        Page<Order> page = queue
+                ? orderRepository.searchQueue(channel, from, to,
+                        PageRequest.of(pageable.getPageNumber(), pageable.getPageSize()))
+                : orderRepository.search(status, channel, from, to, pageable);
         Map<Long, String> names = nicknames(page.getContent());
-        return PageResponse.of(page, o -> OrderMapper.listItem(o, names.get(o.getCustomerId())));
+        Map<Long, BigDecimal> paid = paidTotals(page.getContent());
+        return PageResponse.of(page, o -> OrderMapper.listItem(o, names.get(o.getCustomerId()),
+                paid.getOrDefault(o.getId(), BigDecimal.ZERO)));
+    }
+
+    /** ยอดที่ชำระแล้ว (PAID) ต่อออเดอร์ — query เดียวทั้งหน้า */
+    private Map<Long, BigDecimal> paidTotals(List<Order> orders) {
+        return paymentService.forOrders(orders.stream().map(Order::getId).toList()).stream()
+                .filter(p -> p.getStatus() == PaymentStatus.PAID)
+                .collect(Collectors.groupingBy(Payment::getOrderId,
+                        Collectors.reducing(BigDecimal.ZERO, Payment::getAmount, BigDecimal::add)));
     }
 
     public OrderResponse get(Long id) {
@@ -122,9 +139,6 @@ public class OrderQueryService {
         });
     }
 
-    public LoadedFile slip(Long paymentId) {
-        return paymentService.loadSlip(paymentService.get(paymentId));
-    }
 
     private OrderResponse full(Order o) {
         String nickname = o.getCustomerId() == null ? null : userAccountService.findNickname(o.getCustomerId()).orElse(null);

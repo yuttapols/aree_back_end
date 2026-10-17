@@ -31,8 +31,8 @@ class DashboardIT extends IntegrationTest {
     void dashboardNumbersMatchOrders() {
         clock.set(DAY);
         String staff = api.newStaff("STAFF").accessToken();
-        long classic = api.productId("RT-CLASSIC"); // 30
-        long milo = api.productId("DK-MILO");       // 35
+        long classic = api.productId("โรตีนมข้นน้ำตาล"); // 30
+        long milo = api.productId("ไมโลเย็น");       // 35
 
         order(staff, classic, 2, true);  // 60
         order(staff, milo, 1, true);     // 35
@@ -45,6 +45,9 @@ class DashboardIT extends IntegrationTest {
         assertThat(s.get("netSales").asDouble()).isEqualTo(95.0);
         assertThat(s.get("averagePerOrder").asDouble()).isEqualTo(47.5);
         assertThat(s.get("walkInCount").asLong()).isEqualTo(2);
+        assertThat(s.get("walkInAmount").asDouble()).isEqualTo(95.0);
+        assertThat(s.get("onlineAmount").asDouble()).isEqualTo(0.0);
+        assertThat(s.get("memberAmount").asDouble() + s.get("guestAmount").asDouble()).isEqualTo(95.0);
         assertThat(s.get("cancelledCount").asLong()).isEqualTo(1);
 
         JsonNode top = api.get("/api/v1/admin/dashboard/top-products?from=2026-10-05&to=2026-10-05", admin).data();

@@ -75,7 +75,8 @@ public class ProductQueryService {
         List<ProductImageResponse> images = imageRepository.findByProductIdOrderBySortOrderAscIdAsc(id).stream()
                 .map(ProductImageResponse::of).toList();
         return new ProductDetail(p.getId(), p.getCategory().getId(), p.getCategory().getName(), p.getCode(), p.getName(),
-                p.getDescription(), p.getPrice(), p.getImageUrl(), p.isAvailable(), p.isRecommended(), images, groups);
+                p.getNameEn(), p.getDescription(), p.getDescriptionEn(), p.getPrice(), p.getOriginalPrice(), p.getBadge(),
+                p.getImageUrl(), p.isAvailable(), p.isRecommended(), images, groups);
     }
 
     /** snapshot สินค้า + ตัวเลือก สำหรับคำนวณราคาออเดอร์ (รวมสินค้าที่ปิดขาย เพื่อให้แจ้ง error ได้ถูก) */
@@ -100,7 +101,8 @@ public class ProductQueryService {
     }
 
     private static OptionGroupResponse publicGroup(OptionGroup g) {
-        return new OptionGroupResponse(g.getId(), g.getName(), g.getMinSelect(), g.getMaxSelect(), g.isActive(),
+        return new OptionGroupResponse(g.getId(), g.getName(), g.getNameEn(), g.getMinSelect(), g.getMaxSelect(),
+                g.isDefaultSelected(), g.isActive(),
                 g.getSortOrder(), g.getItems().stream().map(OptionItemResponse::of).toList());
     }
 
