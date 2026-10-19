@@ -78,9 +78,6 @@ public class PaymentMethodService {
     }
 
     private static void apply(PaymentMethod m, PaymentMethodUpsertRequest req) {
-        if (m.isCash() && req.allowOnline()) {
-            throw new BusinessException(ErrorCode.VALIDATION_ERROR, "เงินสดใช้ออนไลน์ไม่ได้");
-        }
         m.setName(req.name().trim());
         m.setRequiresReference(req.requiresReference());
         m.setAllowOnline(req.allowOnline());

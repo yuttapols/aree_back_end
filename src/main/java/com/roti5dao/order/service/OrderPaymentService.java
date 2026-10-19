@@ -51,12 +51,7 @@ public class OrderPaymentService {
     @Transactional
     public OrderResponse payByStaff(Long orderId, StaffPaymentRequest req, Long staffId) {
         Order order = orderService.lock(orderId);
-        // ออเดอร์ "ยังไม่ชำระ" รับเงินได้ระหว่างอยู่ในคิวครัว (CONFIRMED/PREPARING/READY)
-        boolean inKitchen = order.getStatus() == OrderStatus.CONFIRMED || order.getStatus() == OrderStatus.PREPARING
-                || order.getStatus() == OrderStatus.READY;
-        if (!(order.isPayLater() && inKitchen)) {
-            requirePendingPayment(order);
-        }
+        requireOpen(order); // ร้านเก็บเงินตอนรับอาหาร — รับได้ทุกขั้นจนกว่าจะปิด/ยกเลิก
         PaymentMethod method = paymentMethodService.requireUsable(req.methodCode(), false);
         BigDecimal amount = resolveAmount(order, req.amount());
         paymentService.recordByStaff(order.getId(), method, amount, req.cashReceived(), req.referenceNo(), staffId);
@@ -70,7 +65,7 @@ public class OrderPaymentService {
     public TrackResponse submitPayment(UUID trackingToken, String methodCode, BigDecimal amount, String referenceNo) {
         Order order = orderRepository.findByTrackingTokenForUpdate(trackingToken)
                 .orElseThrow(() -> new NotFoundException("ออเดอร์"));
-        requirePendingPayment(order);
+        requireOpen(order);
         PaymentMethod method = paymentMethodService.requireUsable(methodCode, true);
         if (paymentService.pendingCount(order.getId()) >= limits.maxPendingPaymentsPerOrder()) {
             throw new BusinessException(ErrorCode.TOO_MANY_PENDING_PAYMENTS);
@@ -79,6 +74,48 @@ public class OrderPaymentService {
         paymentService.recordOnline(order.getId(), method, value, referenceNo);
         Order full = orderRepository.findWithItems(order.getId()).orElseThrow();
         return OrderMapper.track(full, paymentService.forOrder(order.getId()));
+    }
+
+    /**
+     * ปิดออเดอร์หน้าเคาน์เตอร์ในครั้งเดียว: (ถ้ายังค้าง) บันทึกการจ่ายเต็มยอดคงค้าง → READY → COMPLETED → ให้แต้ม
+     * ทั้งหมดใน transaction เดียว · ไม่แนบการชำระ → ใช้ช่องทางที่ลูกค้าแจ้งไว้ (ถ้าไม่มี → 422 ORDER_INVALID_STATUS)
+     * payment PENDING ที่ลูกค้าแจ้งไว้ (ยังไม่ตรวจ) จะถูกปฏิเสธอัตโนมัติเมื่อรับเงินที่เคาน์เตอร์ครบแล้ว
+     */
+    @Transactional
+    public OrderResponse complete(Long orderId, StaffPaymentRequest payment, Long staffId) {
+        Order order = orderService.lock(orderId);
+        requireOpen(order);
+        if (!orderService.isFullyPaid(order)) {
+            if (payment != null) {
+                PaymentMethod method = paymentMethodService.requireUsable(payment.methodCode(), false);
+                paymentService.recordByStaff(order.getId(), method, remaining(order), payment.cashReceived(),
+                        payment.referenceNo(), staffId);
+            } else {
+                confirmCustomerChoice(order, staffId);
+            }
+            paymentService.rejectPending(order.getId(), staffId, "ชำระที่เคาน์เตอร์แล้ว");
+            order.setPayLater(false);
+        }
+        orderService.advanceToCompleted(order);
+        return OrderMapper.full(order, paymentService.forOrder(orderId), orderService.nickname(order.getCustomerId()));
+    }
+
+    /**
+     * ไม่ได้แนบการชำระ → ใช้ช่องทางที่ลูกค้าแจ้งไว้ล่าสุด (payment PENDING) เป็นค่าเริ่มต้น
+     * ยอดตรงกับยอดคงค้าง = อนุมัติรายการนั้นเลย · ไม่ตรง (เช่น แก้รายการหลังแจ้ง) = บันทึกใหม่เต็มยอดด้วยช่องทางเดิม
+     */
+    private void confirmCustomerChoice(Order order, Long staffId) {
+        Payment chosen = paymentService.forOrder(order.getId()).stream()
+                .filter(p -> p.getStatus() == com.roti5dao.payment.entity.PaymentStatus.PENDING)
+                .max(java.util.Comparator.comparing(Payment::getCreatedAt).thenComparing(Payment::getId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.ORDER_INVALID_STATUS,
+                        "ออเดอร์นี้ยังชำระไม่ครบ — ระบุช่องทางชำระเงิน (methodCode) ก่อนปิดออเดอร์"));
+        BigDecimal remaining = remaining(order);
+        if (chosen.getAmount().compareTo(remaining) == 0) {
+            paymentService.approve(paymentService.lockForUpdate(chosen.getId()), staffId);
+        } else {
+            paymentService.recordByStaff(order.getId(), chosen.getMethod(), remaining, null, chosen.getReferenceNo(), staffId);
+        }
     }
 
     /** พนักงานตรวจยอดเข้า — อนุมัติแล้วยอดครบ → CONFIRMED */
@@ -91,7 +128,7 @@ public class OrderPaymentService {
             throw new BusinessException(ErrorCode.INVALID_OPERATION, "รายการนี้ถูกตรวจสอบไปแล้ว");
         }
         if (approve) {
-            requirePendingPayment(order);
+            requireOpen(order);
             BigDecimal remaining = remaining(order);
             if (payment.getAmount().compareTo(remaining) > 0) {
                 throw new BusinessException(ErrorCode.PAYMENT_AMOUNT_MISMATCH,
@@ -128,9 +165,10 @@ public class OrderPaymentService {
         return MoneyUtils.max(MoneyUtils.ZERO, order.getTotalAmount().subtract(paymentService.paidTotal(order.getId())));
     }
 
-    private static void requirePendingPayment(Order order) {
-        if (order.getStatus() != OrderStatus.PENDING_PAYMENT) {
-            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS);
+    /** ชำระได้ทุกขั้นจนกว่าออเดอร์จะปิด/ยกเลิก (ยอดเกินยอดคงค้างถูกกันที่ resolveAmount) */
+    private static void requireOpen(Order order) {
+        if (order.getStatus() == OrderStatus.COMPLETED || order.getStatus() == OrderStatus.CANCELLED) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "ออเดอร์นี้ปิดหรือยกเลิกไปแล้ว");
         }
     }
 }

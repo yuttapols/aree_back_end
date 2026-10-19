@@ -19,12 +19,16 @@ class OrderStatusMachineTest {
     @CsvSource({
             "PENDING_PAYMENT, CONFIRMED, true",
             "PENDING_PAYMENT, CANCELLED, true",
-            "PENDING_PAYMENT, PREPARING, false",
+            "PENDING_PAYMENT, PREPARING, true",
             "CONFIRMED, PREPARING, true",
             "CONFIRMED, CANCELLED, true",
             "CONFIRMED, COMPLETED, false",
             "PREPARING, READY, true",
-            "PREPARING, CANCELLED, false",
+            "PREPARING, CANCELLED, true",
+            "PREPARING, PENDING_PAYMENT, true",
+            "PREPARING, CONFIRMED, true",
+            "READY, CANCELLED, false",
+            "READY, PREPARING, false",
             "READY, COMPLETED, true",
             "COMPLETED, CANCELLED, false",
             "CANCELLED, CONFIRMED, false"})
@@ -39,5 +43,20 @@ class OrderStatusMachineTest {
         machine.transition(o, OrderStatus.CONFIRMED, now);
         assertThat(o.getConfirmedAt()).isEqualTo(now);
         assertThatThrownBy(() -> machine.transition(o, OrderStatus.COMPLETED, now)).isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    void kitchenTimestampsAndRequeue() {
+        Order o = new Order();
+        Instant t1 = Instant.parse("2026-09-23T05:00:00Z");
+        Instant t2 = t1.plusSeconds(300);
+        machine.transition(o, OrderStatus.PREPARING, t1);
+        assertThat(o.getPreparingAt()).isEqualTo(t1);
+        machine.transition(o, OrderStatus.PENDING_PAYMENT, t2); // สลับคิว
+        assertThat(o.getPreparingAt()).isNull();
+        machine.transition(o, OrderStatus.PREPARING, t2);
+        machine.transition(o, OrderStatus.READY, t2);
+        assertThat(o.getPreparingAt()).isEqualTo(t2);
+        assertThat(o.getReadyAt()).isEqualTo(t2);
     }
 }

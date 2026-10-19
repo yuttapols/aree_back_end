@@ -45,9 +45,9 @@ public class OrderQueryService {
 
     private static final Instant MIN = Instant.parse("2000-01-01T00:00:00Z");
     private static final Instant MAX = Instant.parse("2999-01-01T00:00:00Z");
-    /** สถานะที่แสดงบนคิวครัว: ยืนยันแล้วแต่ยังไม่เสร็จ */
-    private static final Set<OrderStatus> BOARD_STATUSES =
-            Collections.unmodifiableSet(EnumSet.of(OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY));
+    /** สถานะที่แสดงบนคิวครัว: ทุกออเดอร์ที่ยังไม่ปิด/ยกเลิก (ร้านทำก่อน เก็บเงินตอนรับ) */
+    private static final Set<OrderStatus> BOARD_STATUSES = Collections.unmodifiableSet(
+            EnumSet.of(OrderStatus.PENDING_PAYMENT, OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY));
 
     private final OrderRepository orderRepository;
     private final PaymentService paymentService;

@@ -96,7 +96,9 @@ public final class OrderDtos {
 
     public record QuoteResponse(List<Line> items, BigDecimal subtotal, BigDecimal promotionDiscount,
                                 BigDecimal pointDiscount, BigDecimal total, int pointsRedeemed, int pointsToEarn,
-                                List<AppliedPromotion> appliedPromotions) {
+                                List<AppliedPromotion> appliedPromotions,
+                                /** อัตราแลกแต้ม: กี่แต้ม = 1 บาท (จาก point.redeem_points_per_baht) */
+                                int redeemPointsPerBaht) {
     }
 
     public record CustomerRef(Long id, String nickname) {
@@ -109,7 +111,8 @@ public final class OrderDtos {
                                 BigDecimal pointDiscount, BigDecimal totalAmount, BigDecimal paidAmount,
                                 BigDecimal remainingAmount, int pointsRedeemed, int pointsEarned, String note,
                                 Long cashierId, List<PaymentResponse> payments, Instant createdAt,
-                                Instant confirmedAt, Instant completedAt, Instant cancelledAt, String cancelReason,
+                                Instant confirmedAt, Instant preparingAt, Instant readyAt, Instant completedAt,
+                                Instant cancelledAt, String cancelReason,
                                 boolean payLater) {
     }
 
@@ -118,7 +121,8 @@ public final class OrderDtos {
                                 String maskedPhone, List<Line> items, BigDecimal subtotal, BigDecimal promotionDiscount,
                                 BigDecimal pointDiscount, BigDecimal totalAmount, BigDecimal paidAmount,
                                 BigDecimal remainingAmount, List<PublicPaymentResponse> payments, String note,
-                                Instant createdAt, Instant confirmedAt, Instant completedAt, Instant cancelledAt) {
+                                Instant createdAt, Instant confirmedAt, Instant preparingAt, Instant readyAt,
+                                Instant completedAt, Instant cancelledAt) {
     }
 
     public record OrderListItem(Long id, String orderNo, OrderChannel channel, OrderStatus status, int queueNo,
@@ -128,6 +132,7 @@ public final class OrderDtos {
 
     public record BoardItem(Long id, String orderNo, OrderChannel channel, OrderStatus status, int queueNo,
                             String customerName, List<Line> items, String note, Instant createdAt, Instant confirmedAt,
+                            Instant preparingAt, Instant readyAt,
                             boolean payLater) {
     }
 

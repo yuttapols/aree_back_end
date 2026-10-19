@@ -102,7 +102,6 @@ class OrderPaymentIT extends IntegrationTest {
         for (JsonNode o : queue) {
             assertThat(o.get("queueNo").asInt()).isGreaterThan(lastQueueNo); // เรียงตามเลขคิว
             lastQueueNo = o.get("queueNo").asInt();
-            assertThat(o.get("id").asLong()).isNotEqualTo(paidOne);          // จ่ายครบแล้วไม่อยู่ในคิว
             if (o.get("id").asLong() == pending) {
                 card = o;
             }
@@ -119,6 +118,98 @@ class OrderPaymentIT extends IntegrationTest {
         assertThat(done.data().get("completedAt").isNull()).isFalse();
         assertThat(api.post("/api/v1/admin/orders/" + paidOne + "/complete", staff, null).data().get("status").asString())
                 .isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void publicPaymentMethodsCarryShopAccounts() {
+        api.put("/api/v1/admin/settings", api.adminToken(),
+                Map.of("values", Map.of("payment.promptpay_id", "0812345678", "payment.bank_account", "กสิกร 123-4-56789-0")));
+        Map<String, JsonNode> byCode = new HashMap<>();
+        for (JsonNode m : api.get("/api/v1/public/payment-methods", null).data()) {
+            byCode.put(m.get("code").asString(), m);
+        }
+        assertThat(byCode).containsKeys("CASH", "TRANSFER", "PROMPTPAY");
+        assertThat(byCode.get("PROMPTPAY").get("promptPayId").asString()).isEqualTo("0812345678");
+        assertThat(byCode.get("TRANSFER").get("bankAccount").asString()).isEqualTo("กสิกร 123-4-56789-0");
+        assertThat(byCode.get("CASH").get("promptPayId").isNull()).isTrue();
+    }
+
+    @Test
+    void cookFirstPayAtPickupFlow() {
+        String staff = api.newStaff("STAFF").accessToken();
+        long classic = api.productId("โรตีนมข้นน้ำตาล"); // 30
+
+        // ออนไลน์ guest สั่ง → ขึ้นคิวครัวทันทีทั้งที่ยังไม่จ่าย
+        Res created = api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(classic, 2)), "guestName", "บาว"));
+        long id = created.data().get("id").asLong();
+        String token = created.data().get("trackingToken").asString();
+        boolean onBoard = false;
+        for (JsonNode b : api.get("/api/v1/admin/orders/board", staff).data()) {
+            onBoard |= b.get("id").asLong() == id;
+        }
+        assertThat(onBoard).isTrue();
+
+        // เริ่มทำ (ยังไม่จ่าย) → สลับคิว กลับไปรอ → เริ่มทำใหม่ → พร้อมรับ
+        assertThat(api.patch("/api/v1/admin/orders/" + id + "/status", staff, Map.of("status", "PREPARING"))
+                .data().get("status").asString()).isEqualTo("PREPARING");
+        Res back = api.patch("/api/v1/admin/orders/" + id + "/status", staff, Map.of("status", "CONFIRMED"));
+        assertThat(back.data().get("status").asString()).isEqualTo("PENDING_PAYMENT"); // ยังไม่จ่าย → ระบบเลือกให้
+        assertThat(back.data().get("preparingAt").isNull()).isTrue();
+        api.patch("/api/v1/admin/orders/" + id + "/status", staff, Map.of("status", "PREPARING"));
+        api.patch("/api/v1/admin/orders/" + id + "/status", staff, Map.of("status", "READY"));
+
+        // ยังไม่จ่าย → ปิดไม่ได้ทั้ง PATCH และ complete ที่ไม่แนบการชำระ
+        assertThat(api.patch("/api/v1/admin/orders/" + id + "/status", staff, Map.of("status", "COMPLETED")).errorCode())
+                .isEqualTo("ORDER_INVALID_STATUS");
+        assertThat(api.post("/api/v1/admin/orders/" + id + "/complete", staff, null).errorCode())
+                .isEqualTo("ORDER_INVALID_STATUS");
+
+        // ลูกค้าแจ้งว่าจะจ่ายพร้อมเพย์ → กด "เสร็จสิ้น" โดยไม่แนบ body = ยืนยันช่องทางที่ลูกค้าเลือกไว้
+        api.post("/api/v1/public/orders/track/" + token + "/payments", null, Map.of("methodCode", "PROMPTPAY"));
+        Res done = api.post("/api/v1/admin/orders/" + id + "/complete", staff, null);
+        assertThat(done.data().get("status").asString()).isEqualTo("COMPLETED");
+        assertThat(done.data().get("remainingAmount").asDouble()).isEqualTo(0.0);
+        JsonNode pays = done.data().get("payments");
+        assertThat(pays.size()).isEqualTo(1);
+        assertThat(pays.get(0).get("methodCode").asString()).isEqualTo("PROMPTPAY");
+        assertThat(pays.get(0).get("status").asString()).isEqualTo("PAID");
+
+        // track: timeline ครบ
+        JsonNode t = api.get("/api/v1/public/orders/track/" + token, null).data();
+        assertThat(t.get("preparingAt").isNull()).isFalse();
+        assertThat(t.get("readyAt").isNull()).isFalse();
+        assertThat(t.get("completedAt").isNull()).isFalse();
+        boolean hasPaidAt = false;
+        for (JsonNode p : t.get("payments")) {
+            hasPaidAt |= "PAID".equals(p.get("status").asString()) && !p.get("paidAt").isNull();
+        }
+        assertThat(hasPaidAt).isTrue();
+
+        // แนบช่องทางเอง (ต่างจากที่ลูกค้าแจ้ง) → ใช้ของพนักงาน รายการที่ลูกค้าแจ้งถูกปิด
+        Res o2 = api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(classic, 1)), "guestName", "บี"));
+        api.post("/api/v1/public/orders/track/" + o2.data().get("trackingToken").asString() + "/payments", null,
+                Map.of("methodCode", "TRANSFER"));
+        Res done2 = api.post("/api/v1/admin/orders/" + o2.data().get("id").asLong() + "/complete", staff,
+                Map.of("methodCode", "CASH", "cashReceived", 50));
+        int pendingLeft = 0;
+        boolean cashPaid = false;
+        for (JsonNode p : done2.data().get("payments")) {
+            pendingLeft += "PENDING".equals(p.get("status").asString()) ? 1 : 0;
+            cashPaid |= "CASH".equals(p.get("methodCode").asString()) && "PAID".equals(p.get("status").asString())
+                    && p.get("changeAmount").asDouble() == 20.0;
+        }
+        assertThat(pendingLeft).isZero();
+        assertThat(cashPaid).isTrue();
+
+        // ยกเลิกระหว่างทำได้
+        long other = walkIn(staff, Map.of(), item(classic, 1)).data().get("id").asLong();
+        api.patch("/api/v1/admin/orders/" + other + "/status", staff, Map.of("status", "PREPARING"));
+        assertThat(api.post("/api/v1/admin/orders/" + other + "/cancel", staff, Map.of("reason", "ลูกค้าเปลี่ยนใจ"))
+                .data().get("status").asString()).isEqualTo("CANCELLED");
+
+        // quote บอกอัตราแลกแต้ม
+        assertThat(api.post("/api/v1/public/orders/quote", null, Map.of("items", List.of(item(classic, 1))))
+                .data().get("redeemPointsPerBaht").asInt()).isPositive();
     }
 
     @Test
@@ -234,6 +325,26 @@ class OrderPaymentIT extends IntegrationTest {
     }
 
     @Test
+    void onlineGuestPhoneIsOptional() {
+        long banana = api.productId("โรตีกล้วยหอม");
+        // ไม่กรอกเบอร์ / ส่งค่าว่าง → สั่งได้
+        Res noPhone = api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(banana, 1)), "guestName", "โต๊ะ 3"));
+        assertThat(noPhone.status()).isEqualTo(201);
+        assertThat(noPhone.data().get("guestPhone").isNull()).isTrue();
+        Res blank = api.post("/api/v1/public/orders", null,
+                Map.of("items", List.of(item(banana, 1)), "guestName", "โต๊ะ 4", "guestPhone", ""));
+        assertThat(blank.status()).isEqualTo(201);
+        assertThat(api.get("/api/v1/public/orders/track/" + blank.data().get("trackingToken").asString(), null)
+                .data().get("maskedPhone").isNull()).isTrue();
+        // กรอกมาแต่ผิดรูปแบบ → ไม่ผ่าน · ไม่มีชื่อ → ไม่ผ่าน
+        assertThat(api.post("/api/v1/public/orders", null,
+                Map.of("items", List.of(item(banana, 1)), "guestName", "x", "guestPhone", "123")).errorCode())
+                .isEqualTo("VALIDATION_ERROR");
+        assertThat(api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(banana, 1)))).errorCode())
+                .isEqualTo("VALIDATION_ERROR");
+    }
+
+    @Test
     void onlineGuestSelectsMethodAndStaffApproves() {
         long banana = api.productId("โรตีกล้วยหอม"); // 45
         Res created = api.post("/api/v1/public/orders", null, Map.of("items", List.of(item(banana, 2)),
@@ -246,8 +357,13 @@ class OrderPaymentIT extends IntegrationTest {
         assertThat(track.data().get("maskedPhone").asString()).isEqualTo("081-xxx-5678");
         assertThat(track.data().has("trackingToken")).isFalse();
 
-        // ออนไลน์เลือกเงินสดไม่ได้ — เลือกช่องทางอย่างเดียว ไม่มีสลิป
-        assertThat(pay(token, "CASH").errorCode()).isEqualTo("PAYMENT_METHOD_UNAVAILABLE");
+        // ออนไลน์เลือกได้ 3 ช่องทาง (เงินสด/โอน/พร้อมเพย์) — บัตรใช้ได้เฉพาะหน้าร้าน
+        List<String> online = new java.util.ArrayList<>();
+        for (JsonNode m : api.get("/api/v1/public/payment-methods", null).data()) {
+            online.add(m.get("code").asString());
+        }
+        assertThat(online).containsExactly("CASH", "TRANSFER", "PROMPTPAY");
+        assertThat(pay(token, "CARD").errorCode()).isEqualTo("PAYMENT_METHOD_UNAVAILABLE");
 
         Res submitted = pay(token, "PROMPTPAY");
         assertThat(submitted.status()).isEqualTo(201);

@@ -105,7 +105,7 @@ Swagger UI ดูได้ที่ `/swagger-ui.html` (เปิดเฉพา
 | GET | `/files/**` | ดูรูปสาธารณะ (products/avatars/banners) | – | ไฟล์รูป |
 
 **หมายเหตุ /public/orders/*:** ถ้าแนบ `Authorization: Bearer` จะผูกออเดอร์กับสมาชิกอัตโนมัติ (ได้แต้ม/ใช้แต้มได้)
-ถ้าไม่แนบ = guest → **ต้องส่ง `guestName` + `guestPhone`**
+ถ้าไม่แนบ = guest → **ต้องส่ง `guestName`** · `guestPhone` ไม่บังคับ (ไม่กรอก = null, ถ้ากรอกต้องเป็นเบอร์ไทยที่ถูกต้อง ไม่งั้น `400 VALIDATION_ERROR`) — track แสดง `maskedPhone: null`
 
 **Models หลัก**
 ```jsonc
@@ -134,7 +134,7 @@ Swagger UI ดูได้ที่ `/swagger-ui.html` (เปิดเฉพา
 { "items":[ { "productId","productName","unitPrice","optionsPrice","quantity","freeQuantity","lineTotal","note",
               "options":[{"groupName","name","extraPrice"}] } ],
   "subtotal", "promotionDiscount", "pointDiscount", "total",
-  "pointsRedeemed", "pointsToEarn", "appliedPromotions":[ ... ] }
+  "pointsRedeemed", "pointsToEarn", "appliedPromotions":[ ... ], "redeemPointsPerBaht" /* กี่แต้ม = 1 บาท */ }
 
 // OnlineOrderRequest
 { "items":[CartItemRequest], "promoCode":null, "redeemPoints":null,
@@ -150,6 +150,7 @@ Swagger UI ดูได้ที่ `/swagger-ui.html` (เปิดเฉพา
   "createdAt","confirmedAt","completedAt","cancelledAt","cancelReason" }
 ```
 **TrackResponse** = มุมมองสาธารณะ (เบอร์ถูกมาสก์ `maskedPhone`, payments เป็น `PublicPaymentResponse` ไม่มีข้อมูลพนักงาน)
+- OrderResponse / TrackResponse มี `preparingAt`, `readyAt` · `PublicPaymentResponse` = `{ id, methodCode, methodName, amount, status, rejectReason, paidAt, createdAt }`
 
 **แจ้งช่องทางชำระเงิน (JSON, ไม่มีสลิป):** `OnlinePaymentRequest` = `{ methodCode (จำเป็น, จาก /public/payment-methods), amount?, referenceNo? }` — ร้านตรวจยอดเข้าเองแล้วกดอนุมัติ
 - ช่องทางที่ `requiresReference=true` แต่ไม่ส่ง `referenceNo` → `422 REFERENCE_REQUIRED`
@@ -163,7 +164,8 @@ Swagger UI ดูได้ที่ `/swagger-ui.html` (เปิดเฉพา
 5. เลือกช่องทางชำระ (`/public/payment-methods`, แสดง `promptPayId`/`bankAccount`/`instruction`) → แจ้งช่องทางที่เลือกที่ `/track/{token}/payments` (ไม่ต้องแนบสลิป)
 6. หน้า Track: poll `/track/{token}` (แนะนำทุก 10–15 วินาที) แสดง `status`, `queueNo`, สถานะแต่ละ payment (`REJECTED` แสดง `rejectReason` ให้แนบใหม่)
 
-**สถานะออเดอร์:** `PENDING_PAYMENT → CONFIRMED (ยอดครบ/พนักงานตรวจยอดเข้าแล้วอนุมัติ) → PREPARING → READY → COMPLETED`, ยกเลิกได้ → `CANCELLED`
+**สถานะออเดอร์ (ร้านทำก่อน เก็บเงินตอนรับ):** `PENDING_PAYMENT` (สั่งแล้ว ยังไม่จ่าย) → `PREPARING` (กำลังทำ — ยังไม่จ่ายก็เริ่มได้) → `READY` (พร้อมรับ) → ชำระเงิน → `COMPLETED` (รับอาหารแล้ว — ต้องชำระครบ) · `CONFIRMED` = จ่ายแล้ว/ยังไม่ชำระ (payLater) แต่ยังไม่เริ่มทำ · `PREPARING` สลับคิวกลับไปรอได้ · ยกเลิกได้จนถึง `PREPARING` → `CANCELLED`
+**Timeline หน้าติดตาม:** สั่งอาหาร=`createdAt` · กำลังทำ=`preparingAt` · พร้อมรับ=`readyAt` · ชำระเงิน=`remainingAmount==0` (เวลา = `payments[].paidAt` ล่าสุดที่ status PAID) · รับอาหารแล้ว=`completedAt`
 
 ---
 
@@ -207,16 +209,16 @@ userId มาจาก token เสมอ ห้ามส่งจาก client
 |---|---|---|---|---|
 | POST | `/admin/orders/quote` | POS คำนวณราคา (ใส่ `customerPhone` เพื่อใช้สิทธิ์สมาชิก) | `AdminQuoteRequest` | `QuoteResponse` |
 | POST | `/admin/orders` | เปิดบิล WALK_IN (201) | `WalkInOrderRequest` | `OrderResponse` |
-| GET | `/admin/orders` | รายการออเดอร์ (paging) — **`queue=true`** = คิวที่ยังไม่ปิด (PENDING_PAYMENT หรือ payLater ที่ยังไม่ COMPLETED/CANCELLED) เรียงตาม `queueNo` น้อย→มาก (ไม่สน `status`) | `status?, channel?, date? (YYYY-MM-DD), queue?, page, size` | `PageResponse<OrderListItem>` |
-| GET | `/admin/orders/board` | คิวครัววันนี้ (CONFIRMED/PREPARING/READY) | – | `BoardItem[]` |
+| GET | `/admin/orders` | รายการออเดอร์ (paging) — **`queue=true`** = คิวที่ยังไม่ปิด (PENDING_PAYMENT, CONFIRMED, PREPARING, READY) เรียงตาม `queueNo` น้อย→มาก (ไม่สน `status`) | `status?, channel?, date? (YYYY-MM-DD), queue?, page, size` | `PageResponse<OrderListItem>` |
+| GET | `/admin/orders/board` | คิวครัววันนี้ (PENDING_PAYMENT/CONFIRMED/PREPARING/READY — ยังไม่จ่ายก็ขึ้นคิว) | – | `BoardItem[]` |
 | GET | `/admin/orders/{id}` | รายละเอียดออเดอร์ | – | `OrderResponse` |
 | POST | `/admin/orders/{id}/payments` | รับเงิน (201) จ่ายผสมได้ | `StaffPaymentRequest` | `OrderResponse` |
 | POST | `/admin/orders/{id}/pay-later` | เปลี่ยนเป็น "ยังไม่ชำระ": ได้เฉพาะ `PENDING_PAYMENT` → `CONFIRMED` (เข้าคิวครัว) + `payLater=true` · ใช้ได้ทั้ง WALK_IN/ONLINE · payment PENDING ที่ค้างอยู่คงไว้ | – | `OrderResponse` |
-| POST | `/admin/orders/{id}/complete` | **ปิดออเดอร์ทีเดียว** `CONFIRMED`/`PREPARING`/`READY` → `COMPLETED` ใน transaction เดียว · ต้องชำระครบ (`payLater=false`) ไม่งั้น `422 ORDER_INVALID_STATUS` | – | `OrderResponse` |
+| POST | `/admin/orders/{id}/complete` | **ปิดออเดอร์ทีเดียว** (transaction เดียว): ถ้ายังค้างเงิน → บันทึกจ่ายเต็มยอดคงค้างจาก body → เดินไป `READY` → `COMPLETED` → ให้แต้ม · payment `PENDING` ที่ลูกค้าแจ้งไว้ถูกปฏิเสธอัตโนมัติ · **ไม่ส่ง body = ใช้ช่องทางที่ลูกค้าแจ้งไว้ล่าสุด** (payment PENDING) · ไม่มีทั้ง body และช่องทางที่แจ้งไว้ → `422 ORDER_INVALID_STATUS` | `{ "methodCode":"CASH", "cashReceived?":100, "referenceNo?":"" }` (ไม่บังคับ — ส่งเมื่อพนักงานเลือกช่องทางเอง/อยากได้เงินทอน) | `OrderResponse` |
 | POST | `/admin/orders/{id}/items` | เพิ่มรายการ (201) — เฉพาะ WALK_IN, สถานะ PENDING_PAYMENT/CONFIRMED, ไม่ได้ใช้แต้มแลก · คำนวณราคาใหม่ทั้งบิล | `CartItemRequest` | `OrderResponse` |
 | PUT | `/admin/orders/{id}/items/{itemId}` | แก้รายการ (เงื่อนไขเดียวกัน) | `CartItemRequest` | `OrderResponse` |
 | DELETE | `/admin/orders/{id}/items/{itemId}` | ลบรายการ (ลบรายการสุดท้ายไม่ได้) | – | `OrderResponse` |
-| PATCH | `/admin/orders/{id}/status` | เปลี่ยนสถานะ → `PREPARING` / `READY` / `COMPLETED` | `{ "status": "PREPARING" }` | `OrderResponse` |
+| PATCH | `/admin/orders/{id}/status` | `PREPARING` (เริ่มทำ ยังไม่จ่ายได้) / `READY` / `COMPLETED` (ต้องชำระครบ) · **สลับคิว**: จาก `PREPARING` ส่ง `PENDING_PAYMENT` หรือ `CONFIRMED` → ระบบเลือกให้เอง (จ่ายครบหรือ payLater = `CONFIRMED`, ไม่งั้น `PENDING_PAYMENT`) | `{ "status": "PREPARING" }` | `OrderResponse` |
 | POST | `/admin/orders/{id}/cancel` | ยกเลิก (คืนเงิน/แต้ม/โควต้าโปร) | `{ "reason": "..." }` (จำเป็น) | `OrderResponse` |
 | GET | `/admin/orders/{id}/receipt` | ข้อมูลใบเสร็จสำหรับพิมพ์ | – | `ReceiptResponse` |
 
@@ -237,7 +239,7 @@ userId มาจาก token เสมอ ห้ามส่งจาก client
 { "id","orderId","methodCode","methodName","amount","cashReceived","changeAmount","referenceNo",
   "status","paidAt","verifiedBy","rejectReason","createdAt" }
 // BoardItem
-{ "id","orderNo","channel","status","queueNo","customerName","items":[Line],"note","createdAt","confirmedAt","payLater" }
+{ "id","orderNo","channel","status","queueNo","customerName","items":[Line],"note","createdAt","confirmedAt","preparingAt","readyAt","payLater" }
 // ReceiptResponse
 { "shopName","shopPhone","order":OrderResponse,"cashierName","printedAt" }
 ```

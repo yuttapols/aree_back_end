@@ -48,7 +48,8 @@ public class OrderService {
 
     private static final DateTimeFormatter ORDER_DATE = DateTimeFormatter.ofPattern("yyMMdd");
     private static final java.util.Set<OrderStatus> STAFF_TARGETS =
-            java.util.EnumSet.of(OrderStatus.PREPARING, OrderStatus.READY, OrderStatus.COMPLETED);
+            java.util.EnumSet.of(OrderStatus.PREPARING, OrderStatus.READY, OrderStatus.COMPLETED,
+                    OrderStatus.PENDING_PAYMENT, OrderStatus.CONFIRMED);
 
     private final OrderRepository orderRepository;
     private final PricingService pricingService;
@@ -82,7 +83,8 @@ public class OrderService {
     @Transactional(readOnly = true)
     public QuoteResponse quote(List<CartItemRequest> items, String promoCode, Integer redeemPoints, Long customerId,
                                OrderChannel channel) {
-        return OrderMapper.quote(price(items, promoCode, redeemPoints, customerId, channel));
+        return OrderMapper.quote(price(items, promoCode, redeemPoints, customerId, channel),
+                settings.getInt(SettingKey.POINT_REDEEM_POINTS_PER_BAHT));
     }
 
     /** POS quote: ถ้าใส่เบอร์ต้องเป็นสมาชิก */
@@ -107,7 +109,9 @@ public class OrderService {
                 throw new BusinessException(ErrorCode.VALIDATION_ERROR, "กรุณาระบุชื่อผู้สั่ง");
             }
             guestName = req.guestName().trim();
-            guestPhone = UserAccountService.requirePhone(req.guestPhone());
+            // เบอร์ไม่บังคับ (ลูกค้า walk-in สั่งผ่านมือถือโดยไม่สมัคร) — ถ้ากรอกต้องถูกรูปแบบ
+            guestPhone = req.guestPhone() == null || req.guestPhone().isBlank()
+                    ? null : UserAccountService.requirePhone(req.guestPhone());
         } else if (!userAccountService.isActiveMember(customerId)) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED);
         }
@@ -135,16 +139,26 @@ public class OrderService {
 
     // ---------------------------------------------------------------- status
 
-    /** พนักงานเลื่อนสถานะ CONFIRMED → PREPARING → READY → COMPLETED */
+    /**
+     * พนักงานเปลี่ยนสถานะ — ร้านทำก่อนแล้วเก็บเงินตอนรับ:
+     * PREPARING (เริ่มทำ, ยังไม่จ่ายก็ได้) · READY · COMPLETED (ต้องชำระครบ)
+     * PENDING_PAYMENT / CONFIRMED จาก PREPARING = สลับคิว กลับไปรอ (ระบบเลือกให้ตามการชำระ)
+     */
     @Transactional
     public OrderResponse changeStatus(Long orderId, OrderStatus target) {
         if (!STAFF_TARGETS.contains(target)) {
             throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS,
-                    "ใช้ endpoint นี้เปลี่ยนเป็น PREPARING / READY / COMPLETED เท่านั้น");
+                    "ใช้ endpoint นี้เปลี่ยนเป็น PREPARING / READY / COMPLETED หรือกลับไปรอ (PENDING_PAYMENT / CONFIRMED) เท่านั้น");
         }
         Order order = lock(orderId);
-        if (target == OrderStatus.COMPLETED && order.isPayLater()) {
-            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "ออเดอร์นี้ยังชำระไม่ครบ — รับเงินก่อนปิดออเดอร์");
+        if (target == OrderStatus.PENDING_PAYMENT || target == OrderStatus.CONFIRMED) {
+            if (order.getStatus() != OrderStatus.PREPARING) {
+                throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "สลับคิวกลับไปรอได้เฉพาะออเดอร์ที่กำลังทำ");
+            }
+            target = isFullyPaid(order) || order.isPayLater() ? OrderStatus.CONFIRMED : OrderStatus.PENDING_PAYMENT;
+        }
+        if (target == OrderStatus.COMPLETED) {
+            requireFullyPaid(order);
         }
         statusMachine.transition(order, target, time.now());
         if (target == OrderStatus.COMPLETED) {
@@ -167,26 +181,33 @@ public class OrderService {
         return OrderMapper.full(order, paymentService.forOrder(orderId), nickname(order.getCustomerId()));
     }
 
-    /** ปิดออเดอร์หน้าเคาน์เตอร์ในครั้งเดียว — เดินทุกขั้นที่เหลือใน transaction เดียว (พังกลางทาง = rollback ทั้งหมด) */
-    @Transactional
-    public OrderResponse complete(Long orderId) {
-        Order order = lock(orderId);
-        if (order.isPayLater()) {
-            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "ออเดอร์นี้ยังชำระไม่ครบ — รับเงินก่อนปิดออเดอร์");
+    /**
+     * เดินทุกขั้นที่เหลือจนถึง COMPLETED (→ PREPARING → READY → COMPLETED) แล้วให้แต้ม
+     * ต้องชำระครบก่อน — ผู้เรียกต้องอยู่ใน transaction และ lock ออเดอร์แล้ว
+     */
+    void advanceToCompleted(Order order) {
+        if (order.getStatus() == OrderStatus.COMPLETED || order.getStatus() == OrderStatus.CANCELLED) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "ออเดอร์นี้ปิดหรือยกเลิกไปแล้ว");
         }
-        if (order.getStatus() == OrderStatus.PENDING_PAYMENT || order.getStatus() == OrderStatus.COMPLETED
-                || order.getStatus() == OrderStatus.CANCELLED) {
-            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "ปิดออเดอร์ได้เมื่อชำระแล้วและยังไม่เสร็จ/ยกเลิก");
-        }
+        requireFullyPaid(order);
         var now = time.now();
         for (OrderStatus next : List.of(OrderStatus.PREPARING, OrderStatus.READY, OrderStatus.COMPLETED)) {
-            if (statusMachine.canTransition(order.getStatus(), next)) {
+            if (order.getStatus() != next && statusMachine.canTransition(order.getStatus(), next)) {
                 statusMachine.transition(order, next, now);
             }
         }
         events.publishEvent(new OrderCompletedEvent(order.getId(), order.getCustomerId(), order.getTotalAmount()));
         orderRepository.flush();
-        return OrderMapper.full(order, paymentService.forOrder(orderId), nickname(order.getCustomerId()));
+    }
+
+    boolean isFullyPaid(Order order) {
+        return paymentService.paidTotal(order.getId()).compareTo(order.getTotalAmount()) >= 0;
+    }
+
+    private void requireFullyPaid(Order order) {
+        if (!isFullyPaid(order)) {
+            throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS, "ออเดอร์นี้ยังชำระไม่ครบ — รับเงินก่อนปิดออเดอร์");
+        }
     }
 
     /** ยกเลิก: คืนเงิน (mark REFUNDED) + คืนแต้ม/โควต้าโปร ผ่าน OrderCancelledEvent */

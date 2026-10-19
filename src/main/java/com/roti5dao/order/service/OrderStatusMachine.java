@@ -18,9 +18,11 @@ public class OrderStatusMachine {
     private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED = new EnumMap<>(OrderStatus.class);
 
     static {
-        ALLOWED.put(OrderStatus.PENDING_PAYMENT, EnumSet.of(OrderStatus.CONFIRMED, OrderStatus.CANCELLED));
+        // ร้านทำก่อน เก็บเงินตอนรับ: ยังไม่จ่ายก็เริ่มทำได้ · สลับคิวได้ (PREPARING กลับไปรอ) · ยกเลิกระหว่างทำได้
+        ALLOWED.put(OrderStatus.PENDING_PAYMENT, EnumSet.of(OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.CANCELLED));
         ALLOWED.put(OrderStatus.CONFIRMED, EnumSet.of(OrderStatus.PREPARING, OrderStatus.CANCELLED));
-        ALLOWED.put(OrderStatus.PREPARING, EnumSet.of(OrderStatus.READY));
+        ALLOWED.put(OrderStatus.PREPARING, EnumSet.of(OrderStatus.READY, OrderStatus.PENDING_PAYMENT, OrderStatus.CONFIRMED,
+                OrderStatus.CANCELLED));
         ALLOWED.put(OrderStatus.READY, EnumSet.of(OrderStatus.COMPLETED));
         ALLOWED.put(OrderStatus.COMPLETED, EnumSet.noneOf(OrderStatus.class));
         ALLOWED.put(OrderStatus.CANCELLED, EnumSet.noneOf(OrderStatus.class));
@@ -35,9 +37,16 @@ public class OrderStatusMachine {
             throw new BusinessException(ErrorCode.ORDER_INVALID_STATUS,
                     "เปลี่ยนสถานะจาก " + order.getStatus() + " เป็น " + target + " ไม่ได้");
         }
+        OrderStatus from = order.getStatus();
         order.setStatus(target);
+        if (from == OrderStatus.PREPARING && (target == OrderStatus.PENDING_PAYMENT || target == OrderStatus.CONFIRMED)) {
+            order.setPreparingAt(null); // สลับคิว — กลับไปรอ
+            return;
+        }
         switch (target) {
             case CONFIRMED -> order.setConfirmedAt(now);
+            case PREPARING -> order.setPreparingAt(now);
+            case READY -> order.setReadyAt(now);
             case COMPLETED -> order.setCompletedAt(now);
             case CANCELLED -> order.setCancelledAt(now);
             default -> {

@@ -88,6 +88,18 @@ public class PaymentService {
         repository.flush();
     }
 
+    /** ปฏิเสธรายการที่ลูกค้าแจ้งไว้แต่ยังไม่ตรวจ (เช่น รับเงินที่เคาน์เตอร์ครบแล้ว) */
+    public void rejectPending(Long orderId, Long staffId, String reason) {
+        for (Payment p : repository.findByOrderId(orderId)) {
+            if (p.getStatus() == PaymentStatus.PENDING) {
+                p.setStatus(PaymentStatus.REJECTED);
+                p.setVerifiedBy(staffId);
+                p.setRejectReason(reason);
+            }
+        }
+        repository.flush();
+    }
+
     /** ยกเลิกออเดอร์: PAID → REFUNDED, PENDING → REJECTED */
     public void voidForCancelledOrder(Long orderId, Long staffId) {
         for (Payment p : repository.findByOrderId(orderId)) {

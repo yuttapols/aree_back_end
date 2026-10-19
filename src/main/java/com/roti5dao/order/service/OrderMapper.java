@@ -25,12 +25,13 @@ final class OrderMapper {
     private OrderMapper() {
     }
 
-    static QuoteResponse quote(PricingContext ctx) {
+    static QuoteResponse quote(PricingContext ctx, int redeemPointsPerBaht) {
         List<Line> lines = ctx.getLines().stream().map(l -> new Line(null, l.getProductId(), l.getProductName(),
                 l.getUnitPrice(), l.optionsPrice(), l.getQuantity(), l.getFreeQuantity(), l.lineTotal(), l.getNote(),
                 l.getOptions().stream().map(o -> new LineOption(o.optionItemId(), o.groupName(), o.name(), o.extraPrice())).toList())).toList();
         return new QuoteResponse(lines, ctx.getSubtotal(), ctx.getPromotionDiscount(), ctx.getPointDiscount(),
-                ctx.total(), ctx.getPointsRedeemed(), ctx.getPointsToEarn(), List.copyOf(ctx.getAppliedPromotions()));
+                ctx.total(), ctx.getPointsRedeemed(), ctx.getPointsToEarn(), List.copyOf(ctx.getAppliedPromotions()),
+                redeemPointsPerBaht);
     }
 
     static List<Line> lines(Order o) {
@@ -55,7 +56,8 @@ final class OrderMapper {
                 o.getGuestName(), o.getGuestPhone(), lines(o), o.getSubtotal(), o.getPromotionDiscount(),
                 o.getPointDiscount(), o.getTotalAmount(), paid, remaining(o, paid), o.getPointsRedeemed(),
                 o.getPointsEarned(), o.getNote(), o.getCashierId(), payments.stream().map(PaymentResponse::of).toList(),
-                o.getCreatedAt(), o.getConfirmedAt(), o.getCompletedAt(), o.getCancelledAt(), o.getCancelReason(),
+                o.getCreatedAt(), o.getConfirmedAt(), o.getPreparingAt(), o.getReadyAt(), o.getCompletedAt(),
+                o.getCancelledAt(), o.getCancelReason(),
                 o.isPayLater());
     }
 
@@ -65,7 +67,7 @@ final class OrderMapper {
                 PhoneUtils.mask(o.getGuestPhone()), lines(o), o.getSubtotal(), o.getPromotionDiscount(),
                 o.getPointDiscount(), o.getTotalAmount(), paid, remaining(o, paid),
                 payments.stream().map(PublicPaymentResponse::of).toList(), o.getNote(), o.getCreatedAt(),
-                o.getConfirmedAt(), o.getCompletedAt(), o.getCancelledAt());
+                o.getConfirmedAt(), o.getPreparingAt(), o.getReadyAt(), o.getCompletedAt(), o.getCancelledAt());
     }
 
     static OrderListItem listItem(Order o, String customerNickname, BigDecimal paid) {
@@ -76,7 +78,7 @@ final class OrderMapper {
 
     static BoardItem boardItem(Order o, String customerNickname) {
         return new BoardItem(o.getId(), o.getOrderNo(), o.getChannel(), o.getStatus(), o.getQueueNo(),
-                displayName(o, customerNickname), lines(o), o.getNote(), o.getCreatedAt(), o.getConfirmedAt(),
+                displayName(o, customerNickname), lines(o), o.getNote(), o.getCreatedAt(), o.getConfirmedAt(), o.getPreparingAt(), o.getReadyAt(),
                 o.isPayLater());
     }
 

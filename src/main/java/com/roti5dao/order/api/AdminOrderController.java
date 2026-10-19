@@ -127,9 +127,10 @@ public class AdminOrderController {
     }
 
     @PostMapping("/{id}/complete")
-    @Operation(summary = "🧑‍🍳 ปิดออเดอร์ทีเดียว — CONFIRMED/PREPARING/READY → COMPLETED (ต้องชำระครบ)")
-    public ApiResponse<OrderResponse> complete(@PathVariable Long id) {
-        return ApiResponse.ok(orderService.complete(id));
+    @Operation(summary = "🧑‍🍳 ปิดออเดอร์ทีเดียว (รับเงิน + READY + COMPLETED ใน transaction เดียว) — ไม่แนบ body = ใช้ช่องทางที่ลูกค้าแจ้งไว้, แนบ { methodCode, cashReceived? } = พนักงานเลือกเอง")
+    public ApiResponse<OrderResponse> complete(@PathVariable Long id,
+                                               @Valid @RequestBody(required = false) StaffPaymentRequest payment) {
+        return ApiResponse.ok(orderPaymentService.complete(id, payment, CurrentUser.requireId()));
     }
 
     @PatchMapping("/{id}/status")

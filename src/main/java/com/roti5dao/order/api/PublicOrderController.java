@@ -51,7 +51,7 @@ public class PublicOrderController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "🌐 สร้างออเดอร์ ONLINE — guest ต้องส่ง guestName + guestPhone")
+    @Operation(summary = "🌐 สร้างออเดอร์ ONLINE — guest ต้องส่ง guestName (guestPhone ไม่บังคับ ถ้าส่งต้องถูกรูปแบบ)")
     public ApiResponse<OrderResponse> create(@Valid @RequestBody OnlineOrderRequest req) {
         return ApiResponse.ok(orderService.createOnline(req, CurrentUser.get()));
     }

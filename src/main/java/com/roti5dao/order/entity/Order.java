@@ -84,6 +84,12 @@ public class Order extends AuditableEntity {
     @Column(name = "confirmed_at")
     private Instant confirmedAt;
 
+    @Column(name = "preparing_at")
+    private Instant preparingAt;
+
+    @Column(name = "ready_at")
+    private Instant readyAt;
+
     /** POS "ยังไม่ชำระ" — เข้าคิวครัวแล้วแต่ยังค้างเงิน (ชำระครบแล้วกลับเป็น false) */
     @Column(name = "pay_later", nullable = false)
     private boolean payLater;

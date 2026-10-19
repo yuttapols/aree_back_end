@@ -55,10 +55,10 @@ public final class PaymentDtos {
 
     /** มุมมองของลูกค้า (หน้า track) — ไม่เปิดเผยข้อมูลพนักงานผู้ตรวจ */
     public record PublicPaymentResponse(Long id, String methodCode, String methodName, BigDecimal amount,
-                                        PaymentStatus status, String rejectReason, Instant createdAt) {
+                                        PaymentStatus status, String rejectReason, Instant paidAt, Instant createdAt) {
         public static PublicPaymentResponse of(Payment p) {
             return new PublicPaymentResponse(p.getId(), p.getMethod().getCode(), p.getMethod().getName(), p.getAmount(),
-                    p.getStatus(), p.getRejectReason(), p.getCreatedAt());
+                    p.getStatus(), p.getRejectReason(), p.getPaidAt(), p.getCreatedAt());
         }
     }
 }
