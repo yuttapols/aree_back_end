@@ -1,0 +1,3 @@
+# script ที่รันใน Linux (Docker) ต้องเป็น LF เสมอ
+mvnw text eol=lf
+*.sh text eol=lf
