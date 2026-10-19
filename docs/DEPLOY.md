@@ -24,8 +24,9 @@
    DB_PASSWORD = PASSWORD
    ```
 
-> ⚠️ ถ้า DB นี้เคยรันแอปด้วย `.env` ของ dev มาแล้ว จะมีบัญชี ADMIN `0800000000` อยู่ และค่า `ROTI_ADMIN_*` ใหม่จะไม่ถูกใช้
-> แนะนำให้ขึ้นจริงด้วย **branch/project ใหม่ที่ว่างเปล่า** — ตาราง + เมนูเริ่มต้นจะถูกสร้างอัตโนมัติด้วย Flyway ตอน start ครั้งแรก
+> ⚠️ **ต้องใช้ DB ใหม่ที่ว่างเปล่า** (project หรือ branch ใหม่ใน Neon) — ตาราง + เมนูเริ่มต้นจะถูกสร้างอัตโนมัติด้วย Flyway ตอน start ครั้งแรก
+> ถ้า DB เคยรันแอปแบบ dev มาก่อน (มีข้อมูลตัวอย่าง `dev seed` + ADMIN `0800000000`) แอปแบบ prod จะ **start ไม่ขึ้น**
+> (`FlywayValidateException: Detected applied migration not resolved locally: dev seed`) และค่า `ROTI_ADMIN_*` ใหม่จะไม่ถูกใช้
 
 ## 2. Render (Backend)
 
@@ -87,3 +88,11 @@ FE เรียก API ด้วย path relative `/api/v1/...` · `CORS_ALLOWED
 - **Swagger บน prod** ปิดอยู่ — เปิดชั่วคราวด้วย `API_DOCS_ENABLED=true` แล้วปิดกลับ
 - Neon หลับเมื่อไม่มีการใช้งาน ~5 นาที → request แรกหลังหลับช้า 1–3 วิ (ตั้ง pool ไม่ให้ ping DB ไว้แล้ว เพื่อไม่ให้กินโควต้า compute)
 - Migration รันอัตโนมัติทุกครั้งที่ deploy (Flyway) — ห้ามแก้ไฟล์ `V*.sql` ที่ขึ้นไปแล้ว ให้สร้างไฟล์ใหม่แทน
+
+## 6. ผลทดสอบก่อนขึ้น (2026-10-19)
+
+รัน jar ด้วย `SPRING_PROFILES_ACTIVE=prod` + JVM options เดียวกับ Dockerfile (heap ≤ 300MB) บนเครื่อง:
+- start ใน ~18 วินาที · `/actuator/health` = `UP` · Flyway ถึง V21
+- Swagger ปิด (`/v3/api-docs` = 404) · `/api/v1/public/menu` = 200
+- `/api/v1/public/payment-methods` = `CASH`, `TRANSFER`, `PROMPTPAY`
+- ยังไม่ได้ทดสอบ: build Docker image (เครื่องนี้ไม่มี Docker) และต่อ Neon จริง — ดู log ของ Render ตอน deploy แรก
