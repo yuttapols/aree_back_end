@@ -29,6 +29,9 @@ public class Category extends AuditableEntity {
     @Column(nullable = false, length = 100)
     private String slug;
 
+    @Column(name = "name_en", length = 100)
+    private String nameEn;
+
     @Column(length = 500)
     private String description;
 

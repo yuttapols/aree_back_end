@@ -122,6 +122,28 @@ class CatalogAdminIT extends IntegrationTest {
     }
 
     @Test
+    void categoryWithoutSortOrderAndWithNameEn() {
+        // body เดียวกับที่ FE ส่ง (ไม่มี sortOrder)
+        Res created = api.post("/api/v1/admin/categories", api.adminToken(), Map.of("name", "โรตีพิเศษ", "nameEn", "Special roti",
+                "slug", "test-no-sort", "description", "", "icon", "pi pi-gift", "active", true));
+        assertThat(created.status()).isEqualTo(201);
+        assertThat(created.data().get("nameEn").asString()).isEqualTo("Special roti");
+        int order = created.data().get("sortOrder").asInt();
+        assertThat(order).isPositive(); // ต่อท้าย
+        long id = created.data().get("id").asLong();
+
+        Res updated = api.put("/api/v1/admin/categories/" + id, api.adminToken(), Map.of("name", "โรตีพิเศษ 2", "nameEn", "",
+                "slug", "test-no-sort", "description", "", "icon", "pi pi-gift", "active", true));
+        assertThat(updated.status()).isEqualTo(200);
+        assertThat(updated.data().get("sortOrder").asInt()).isEqualTo(order); // ไม่ส่ง = คงเดิม
+        assertThat(updated.data().get("nameEn").isNull()).isTrue();
+
+        // slug ซ้ำกับหมวดที่มีอยู่ (เช่น "roti" จากเมนูเริ่มต้น) → 409
+        assertThat(api.post("/api/v1/admin/categories", api.adminToken(), Map.of("name", "x", "slug", "test-no-sort", "active", true))
+                .errorCode()).isEqualTo("DUPLICATE_VALUE");
+    }
+
+    @Test
     void categoryDeleteIsSeparateFromDeactivate() {
         long cat = createCategory("test-cat-del");
         long pid = api.post("/api/v1/admin/products", api.adminToken(), product(cat, "TST-DEL1", 30)).data().get("id").asLong();

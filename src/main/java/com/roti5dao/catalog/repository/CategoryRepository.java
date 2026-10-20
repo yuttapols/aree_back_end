@@ -12,5 +12,8 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
 
     boolean existsBySlug(String slug);
 
+    @org.springframework.data.jpa.repository.Query("select coalesce(max(c.sortOrder), 0) from Category c")
+    int maxSortOrder();
+
     boolean existsBySlugAndIdNot(String slug, Long id);
 }

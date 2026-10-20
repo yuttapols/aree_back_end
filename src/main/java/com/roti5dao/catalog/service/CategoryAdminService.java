@@ -85,12 +85,17 @@ public class CategoryAdminService {
         return repository.findById(id).orElseThrow(() -> new NotFoundException("หมวดหมู่"));
     }
 
-    private static void apply(Category c, CategoryUpsertRequest req) {
+    private void apply(Category c, CategoryUpsertRequest req) {
         c.setName(req.name().trim());
+        c.setNameEn(req.nameEn() == null || req.nameEn().isBlank() ? null : req.nameEn().trim());
         c.setSlug(req.slug());
         c.setDescription(req.description());
         c.setIcon(req.icon());
-        c.setSortOrder(req.sortOrder());
+        if (req.sortOrder() != null) {
+            c.setSortOrder(req.sortOrder());
+        } else if (c.getId() == null) {
+            c.setSortOrder(repository.maxSortOrder() + 1);
+        }
         c.setActive(req.active());
     }
 }

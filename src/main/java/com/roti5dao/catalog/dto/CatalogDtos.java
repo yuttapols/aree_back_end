@@ -26,10 +26,10 @@ public final class CatalogDtos {
 
     // ---------- Responses ----------
 
-    public record CategoryResponse(Long id, String name, String slug, String description, String icon, int sortOrder,
-                                   boolean active) {
+    public record CategoryResponse(Long id, String name, String nameEn, String slug, String description, String icon,
+                                   int sortOrder, boolean active) {
         public static CategoryResponse of(Category c) {
-            return new CategoryResponse(c.getId(), c.getName(), c.getSlug(), c.getDescription(), c.getIcon(),
+            return new CategoryResponse(c.getId(), c.getName(), c.getNameEn(), c.getSlug(), c.getDescription(), c.getIcon(),
                     c.getSortOrder(), c.isActive());
         }
     }
@@ -89,10 +89,12 @@ public final class CatalogDtos {
 
     public record CategoryUpsertRequest(
             @NotBlank @Size(max = 100) String name,
+            @Size(max = 100) String nameEn,
             @NotBlank @Size(max = 100) @Pattern(regexp = "^[a-z0-9]+(-[a-z0-9]+)*$", message = "ใช้ได้เฉพาะ a-z 0-9 และ -") String slug,
             @Size(max = 500) String description,
             @Size(max = 100) @Pattern(regexp = "^[a-zA-Z0-9 _-]*$", message = "icon ไม่ถูกต้อง") String icon,
-            @Min(0) @Max(100000) int sortOrder,
+            /** ไม่ส่ง = สร้างใหม่ต่อท้าย / แก้ไขคงลำดับเดิม (จัดลำดับใช้ PATCH /sort) */
+            @Min(0) @Max(100000) Integer sortOrder,
             boolean active) {
     }
 
